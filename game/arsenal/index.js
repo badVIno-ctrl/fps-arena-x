@@ -132,6 +132,11 @@ export class ArsenalSystem {
     const rig = this.rigs.get(weaponId);
     if (!rig || !loadout) return false;
     rig.setLoadout(loadout);
+    // A new build can be a new barrel, and barrel length is what sets muzzle
+    // velocity. The engine memoises that per weapon for the fire path, so the
+    // memo has to be told the geometry moved — otherwise a swapped barrel would
+    // look different and shoot identically.
+    this.weapons?.resetBallisticsCache?.();
     const slot = ARSENAL_DEFS[weaponId]?.slot;
     const i = DIGIT_SLOTS.indexOf(slot);
     if (i >= 0) {

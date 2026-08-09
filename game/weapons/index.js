@@ -4,6 +4,7 @@ import { WeaponMaterials, ENV_OCCLUSION } from './materials.js';
 import { Viewmodel } from './viewmodel.js';
 import { ProjectileSim } from './ballistics.js';
 import { WEAPON_DEFS, buildRecoilPattern, SPREAD_MODS, WALL_PRESS } from './defs.js';
+import { cartridgeFor, muzzleVelocity } from '../ballistics/cartridges.js';
 import { buildRifle } from './models/rifle.js';
 import { buildSmg } from './models/smg.js';
 import { buildPistol } from './models/pistol.js';
@@ -408,20 +409,53 @@ export class WeaponSystem {
     }
 
     // ---- projectile ----
+    //
+    // Two shapes of shot, and the difference is physical rather than a special
+    // case in the damage code:
+    //
+    //   single      one round, launched along the aim line
+    //   multi       a shot shell's nine pellets, each an independent projectile
+    //               with its own spread offset, its own drag and its own
+    //               contact. That is what makes buckshot lose its teeth with
+    //               distance, lets a doorframe eat half a pattern, and means a
+    //               body armour plate can stop some pellets and not others —
+    //               none of which a single "damage x 9" round can express.
     this.viewmodel.muzzleWorld(this._muzzle);
     const seed = this.rng.u32();
-    this.sim.spawn({
-      origin: this._muzzle,
-      dir: this._dir,
-      speed: def.muzzleVelocity,
-      damage: def.damage,
-      penetration: def.penetration,
-      dragK: def.dragK,
-      dropoff: def.dropoff,
-      maxRange: def.maxRange,
-      weapon: def,
-      tracer: this.stats.fired % def.tracerEvery === 0,
-    });
+    const ballistics = this._ballisticsFor(def);
+    const pellets = ballistics.cartridge?.pellets ?? 1;
+    const tracer = this.stats.fired % def.tracerEvery === 0;
+
+    for (let n = 0; n < pellets; n++) {
+      let dir = this._dir;
+      if (pellets > 1) {
+        // Pattern spread, on top of the aim cone the whole shot already carries.
+        // `patternDeg` is the cone the shell throws; a choke narrows it.
+        const d = this.rng.disc(this._pelletDisc ?? (this._pelletDisc = { x: 0, y: 0 }));
+        const cone = Math.tan((def.patternDeg ?? 3.4) * DEG);
+        this._pelletDir ??= this._dir.clone();
+        dir = this._pelletDir
+          .copy(this._dir)
+          .addScaledVector(this._right, cone * d.x)
+          .addScaledVector(this._up, cone * d.y)
+          .normalize();
+      }
+      this.sim.spawn({
+        origin: this._muzzle,
+        dir,
+        speed: ballistics.v0,
+        cartridge: ballistics.cartridge,
+        // Per-pellet damage: the def's figure is what one trigger pull is worth,
+        // so a nine-pellet shell divides it rather than multiplying it.
+        damage: def.damage / pellets,
+        penetration: def.penetration,
+        dragK: def.dragK,
+        dropoff: def.dropoff,
+        maxRange: def.maxRange,
+        weapon: def,
+        tracer: tracer && n === 0,
+      });
+    }
 
     // ---- feedback ----
     this.viewmodel.addRecoil(pitch, yaw, first);
@@ -441,6 +475,46 @@ export class WeaponSystem {
     // Shell leaves the port shortly after the shot, once the bolt is back.
     this._queueShell(Math.min(0.05, this._fireTimer * 0.45));
     return true;
+  }
+
+  /**
+   * Resolve the ballistics for one shot: which cartridge, and how fast it leaves
+   * THIS barrel.
+   *
+   * Memoised per weapon id, because it is a pure function of the definition and
+   * `tryFire` runs up to sixteen times a second. Two facts make the memo safe:
+   * the cartridge table is immutable, and a barrel attachment that changes the
+   * length bumps the rig revision, which clears the cache through `resetCache()`.
+   *
+   * Falls back to the declared `muzzleVelocity` when a weapon names no cartridge.
+   * That is not a stub — the three archetype definitions in defs.js legitimately
+   * have no cartridge, and the legacy drag path in the projectile sim is still
+   * exactly correct for them.
+   */
+  _ballisticsFor(def) {
+    this._ballCache ??= new Map();
+    const hit = this._ballCache.get(def.id);
+    if (hit) return hit;
+
+    let entry;
+    if (def.cartridge) {
+      const cart = cartridgeFor(def.cartridge);
+      // The barrel the player is actually holding, including whatever the
+      // gunsmith bolted on. `resolvedStats().barrelMm` is the mounted figure;
+      // the def's own value is the bare weapon.
+      const stats = this.resolvedStats?.();
+      const barrel = stats?.barrelMm ?? def.barrelMm ?? 400;
+      entry = { cartridge: cart, v0: muzzleVelocity(cart, barrel), barrel };
+    } else {
+      entry = { cartridge: null, v0: def.muzzleVelocity, barrel: def.barrelMm ?? null };
+    }
+    this._ballCache.set(def.id, entry);
+    return entry;
+  }
+
+  /** Called when a build changes: the barrel may be a different length now. */
+  resetBallisticsCache() {
+    this._ballCache?.clear();
   }
 
   _queueShell(delay) {

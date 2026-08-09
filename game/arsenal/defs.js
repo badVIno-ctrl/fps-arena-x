@@ -159,6 +159,12 @@ export const ARSENAL_DEFS = {
     slot: 'rifle',
     family: 'ak',
     caliber: '7.62x39',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '7.62x39',
+    barrelMm: 415,
     rpm: 600,
     modes: ['auto', 'semi'],
     burstCount: 3,
@@ -209,6 +215,12 @@ export const ARSENAL_DEFS = {
     slot: 'rifle',
     family: 'ak',
     caliber: '5.45x39',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '5.45x39',
+    barrelMm: 415,
     rpm: 652,
     modes: ['auto', 'semi'],
     burstCount: 3,
@@ -259,6 +271,12 @@ export const ARSENAL_DEFS = {
     slot: 'rifle',
     family: 'ar',
     caliber: '5.56x45',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '5.56x45',
+    barrelMm: 368,
     rpm: 706,
     modes: ['auto', 'burst', 'semi'],
     burstCount: 3,
@@ -309,6 +327,12 @@ export const ARSENAL_DEFS = {
     slot: 'rifle',
     family: 'scar',
     caliber: '7.62x51',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '7.62x51',
+    barrelMm: 400,
     rpm: 571,
     modes: ['auto', 'semi'],
     burstCount: 2,
@@ -359,6 +383,12 @@ export const ARSENAL_DEFS = {
     slot: 'rifle',
     family: 'svd',
     caliber: '7.62x54R',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '7.62x54R',
+    barrelMm: 620,
     rpm: 176,
     modes: ['semi'],
     burstCount: 1,
@@ -412,6 +442,12 @@ export const ARSENAL_DEFS = {
     slot: 'special',
     family: 'mp5',
     caliber: '9x19',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '9x19',
+    barrelMm: 225,
     rpm: 800,
     modes: ['auto', 'burst', 'semi'],
     burstCount: 3,
@@ -462,6 +498,12 @@ export const ARSENAL_DEFS = {
     slot: 'special',
     family: 'pump',
     caliber: '12 gauge',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '12g-buck',
+    barrelMm: 470,
     rpm: 70,
     modes: ['pump'],
     burstCount: 1,
@@ -518,6 +560,12 @@ export const ARSENAL_DEFS = {
     slot: 'pistol',
     family: 'glock',
     caliber: '9x19',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '9x19',
+    barrelMm: 114,
     /** The 18 is select-fire: 500 rpm on semi, 1200 rpm on its auto sear. */
     rpm: 500,
     autoRpm: 1200,
@@ -570,6 +618,12 @@ export const ARSENAL_DEFS = {
     slot: 'pistol',
     family: 'deagle',
     caliber: '.50 AE',
+    /* Ammunition is a first-class object now, not a set of numbers copied
+     * onto the weapon: muzzle velocity comes out of the cartridge and THIS
+     * barrel length, and damage falls off because energy does. See
+     * game/ballistics/cartridges.js. */
+    cartridge: '.50AE',
+    barrelMm: 152,
     rpm: 214,
     modes: ['semi'],
     burstCount: 1,

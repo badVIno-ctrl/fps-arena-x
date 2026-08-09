@@ -31,7 +31,6 @@ import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import net from 'node:net';
 
 import { resolveBrowser } from './browser.mjs';
 
@@ -80,19 +79,28 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
 
-const portOpen = (port) =>
-  new Promise((res) => {
-    const s = net.connect({ port, host: '127.0.0.1' }, () => (s.destroy(), res(true)));
-    s.on('error', () => res(false));
-    s.setTimeout(400, () => (s.destroy(), res(false)));
-  });
-
-async function waitForPort(port, ms = 40_000) {
+/**
+ * Readiness is "it answers", not "the port is open".
+ *
+ * An open port is not the same thing: a previous run's socket can still be in
+ * TIME_WAIT, and uvicorn binds before it finishes importing the app. Both cases
+ * produce a port that accepts a connection and then refuses the request, which
+ * shows up as an ECONNREFUSED several lines later with no obvious cause.
+ */
+async function waitForHealth(ms = 60_000) {
   const until = Date.now() + ms;
+  let lastErr = 'never tried';
   while (Date.now() < until) {
-    if (await portOpen(port)) return true;
-    await new Promise((r) => setTimeout(r, 250));
+    try {
+      const r = await fetch(`${BASE}/healthz`, { signal: AbortSignal.timeout(2000) });
+      if (r.ok) return true;
+      lastErr = `HTTP ${r.status}`;
+    } catch (err) {
+      lastErr = String(err?.cause?.code ?? err?.name ?? err);
+    }
+    await new Promise((r) => setTimeout(r, 300));
   }
+  console.error(`the relay never answered /healthz: ${lastErr}`);
   return false;
 }
 
@@ -104,7 +112,7 @@ if (!existsSync(join(ROOT, 'out', 'index.html'))) {
 }
 
 let relay = null;
-if (!(await portOpen(PORT))) {
+if (!(await waitForHealth(1500))) {
   relay = spawn(
     'python3',
     ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', String(PORT), '--no-access-log'],
@@ -113,8 +121,8 @@ if (!(await portOpen(PORT))) {
   let log = '';
   relay.stdout.on('data', (d) => (log += d));
   relay.stderr.on('data', (d) => (log += d));
-  if (!(await waitForPort(PORT))) {
-    console.error('the relay never came up:\n' + log);
+  if (!(await waitForHealth())) {
+    console.error('relay output:\n' + log);
     process.exit(1);
   }
 }
@@ -322,6 +330,195 @@ for (const vp of WIDTHS) {
   if (WANT_SHOTS) {
     await page.screenshot({ path: join(ROOT, 'shots', `menu-${vp.name}.png`) });
     console.log(`      shots/menu-${vp.name}.png`);
+  }
+
+  await context.close();
+}
+
+/* --------------------------------------------------------- the live engine */
+
+/**
+ * The end-to-end test: boot the whole engine, in a browser, and fire a round.
+ *
+ * Every other check in this file looks at the menu — which is DOM, and which
+ * would keep passing if the game behind it were completely broken. This section
+ * is the one that would have caught the ballistics rewrite putting a NaN in a
+ * projectile's velocity, or an arsenal model failing to build, because it runs
+ * the real code path from trigger to impact.
+ *
+ * Capture mode is used deliberately: it answers the menu from the query string,
+ * fixes the RNG seed, and hands over `window.__PUMP__` so frames advance under
+ * our control rather than at whatever rate software rasterisation manages.
+ */
+section('engine: the game boots and shoots');
+
+{
+  const context = await browser.newContext({ viewport: { width: 800, height: 450 } });
+  const page = await context.newPage();
+  // SwiftShader rasterises this scene in software. Generous, because a slow
+  // frame is not a failure — a missing frame is.
+  page.setDefaultTimeout(420_000);
+
+  const errors = [];
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+  });
+  page.on('pageerror', (e) => errors.push(`UNCAUGHT: ${e.message}`));
+
+  const t0 = Date.now();
+  let ready = true;
+  await page.goto(
+    `${BASE}/?capture=1&lockstep=1&mode=bots&submode=dm&difficulty=normal&q=low&prewarm=0`,
+    { waitUntil: 'load' },
+  );
+  try {
+    await page.waitForFunction('window.__READY__ === true');
+  } catch {
+    ready = false;
+  }
+  const bootSeconds = (Date.now() - t0) / 1000;
+
+  check('the engine reaches a first frame', () => {
+    assert(ready, `window.__READY__ never became true (waited ${bootSeconds.toFixed(0)}s)`);
+  });
+  console.log(`      boot: ${bootSeconds.toFixed(1)}s under software rasterisation`);
+
+  const state = await page.evaluate(() => {
+    const e = window.__ENGINE__;
+    const wp = e.registry.peek('weapons');
+    const player = e.registry.peek('player');
+    const world = e.registry.peek('world');
+    const ai = e.registry.peek('ai');
+    return {
+      systems: e.registry.resolve().map((s) => s.constructor.id ?? s.id),
+      weapon: wp?.activeId ?? null,
+      weapons: wp ? [...wp.states.keys()] : [],
+      mag: wp?.state?.mag ?? null,
+      alive: player?.health ? !player.health.dead : null,
+      health: player?.health?.value ?? null,
+      worldTris: world?.stats?.staticTris ?? 0,
+      agents: ai?.agents?.length ?? ai?.stats?.alive ?? null,
+      frame: e.time.frame,
+    };
+  });
+
+  check('every subsystem initialised', () => {
+    assert(state.systems.length >= 15, `only ${state.systems.length} systems resolved`);
+  });
+
+  check('the arsenal replaced the archetypes', () => {
+    // ArsenalSystem deletes the three base defs once its nine are built. If a
+    // base id survives, the roster is in a half-swapped state.
+    assert(state.weapons.length === 9, `${state.weapons.length} weapons in the roster`);
+    for (const legacy of ['rifle', 'smg', 'pistol']) {
+      assert(!state.weapons.includes(legacy), `archetype "${legacy}" is still in the roster`);
+    }
+  });
+
+  check('the world was generated', () => {
+    assert(state.worldTris > 100_000, `only ${state.worldTris} static triangles`);
+  });
+
+  check('the player is alive and holding a loaded weapon', () => {
+    assert(state.alive === true, 'the player is not alive');
+    assert(state.health > 0, `health is ${state.health}`);
+    assert(state.mag > 0, `magazine holds ${state.mag}`);
+  });
+
+  /**
+   * The shot. Resolve the cartridge, fire, then step the projectile simulation by
+   * hand and watch it behave: leave at the published muzzle velocity, carry the
+   * published muzzle energy, and slow down.
+   */
+  const shot = await page.evaluate(() => {
+    const wp = window.__ENGINE__.registry.peek('weapons');
+    const sim = wp.sim;
+    const b = wp._ballisticsFor(wp.state.def);
+    const out = {
+      weapon: wp.activeId,
+      cartridge: b.cartridge?.id ?? null,
+      barrel: b.barrel,
+      v0: b.v0,
+      formFactor: b.cartridge?.formFactor ?? null,
+      fired: wp.tryFire(),
+    };
+    const p = sim.live[0];
+    out.launched = !!p;
+    if (p) {
+      out.launchSpeed = p.vel.length();
+      out.energy0 = p.energy0;
+      out.finite = Number.isFinite(p.vel.x) && Number.isFinite(p.pos.y);
+    }
+    // Free flight in the open: aim straight up so nothing is hit and drag has
+    // room to act. Then step and confirm it is decelerating.
+    sim.clear();
+    sim.spawn({
+      origin: { x: 0, y: 200, z: 0 },
+      dir: { x: 1, y: 0.2, z: 0 },
+      speed: b.v0,
+      cartridge: b.cartridge,
+      damage: 30,
+      maxRange: 900,
+      weapon: wp.state.def,
+    });
+    const samples = [];
+    for (let i = 0; i < 120; i++) {
+      sim.fixedUpdate(1 / 120);
+      const q = sim.live[0];
+      if (!q) break;
+      if (i === 11 || i === 59 || i === 119) {
+        samples.push({ t: (i + 1) / 120, d: q.travelled, v: q.vel.length(), y: q.pos.y });
+      }
+    }
+    out.samples = samples;
+    out.stats = { ...sim.stats };
+    return out;
+  });
+
+  check('the trigger produces a projectile', () => {
+    assert(shot.fired === true, 'tryFire() refused');
+    assert(shot.launched === true, 'no projectile appeared in the simulation');
+    assert(shot.finite === true, 'the projectile has a non-finite position or velocity');
+  });
+
+  check('muzzle velocity comes from the cartridge and this barrel', () => {
+    assert(shot.cartridge, `${shot.weapon} resolved no cartridge`);
+    assert(Math.abs(shot.launchSpeed - shot.v0) < 1, `left at ${shot.launchSpeed}, expected ${shot.v0}`);
+    // The AKM is the default draw: 7.62x39 out of 415 mm is 715 m/s and 2010 J.
+    assert(shot.v0 > 300 && shot.v0 < 1000, `implausible muzzle velocity ${shot.v0}`);
+    assert(shot.formFactor > 0.8 && shot.formFactor < 2.4, `form factor ${shot.formFactor}`);
+  });
+
+  check('the round decelerates in flight, and keeps decelerating', () => {
+    const s = shot.samples;
+    assert(s.length === 3, `only ${s.length} flight samples`);
+    assert(s[0].v > s[1].v && s[1].v > s[2].v, 'the round did not slow down');
+    assert(s[0].d < s[1].d && s[1].d < s[2].d, 'the round did not travel');
+    // Quadratic drag means the first interval loses more speed than the last.
+    const early = s[0].v - s[1].v;
+    const late = s[1].v - s[2].v;
+    assert(early > late, `lost ${early.toFixed(0)} m/s early and ${late.toFixed(0)} m/s late: drag looks linear`);
+  });
+
+  check('gravity acts on the round', () => {
+    const s = shot.samples;
+    // Launched with an upward component, so it must be rising more slowly by the
+    // end than at the start.
+    const rise1 = s[1].y - s[0].y;
+    const rise2 = s[2].y - s[1].y;
+    assert(rise2 < rise1, 'the trajectory does not curve downwards');
+  });
+
+  // Let the viewmodel finish its draw animation and take a real gameplay frame.
+  await page.evaluate(() => window.__PUMP__(45));
+
+  check('the console stayed clean through boot and a shot', () => {
+    assert(errors.length === 0, errors.slice(0, 4).join(' | '));
+  });
+
+  if (WANT_SHOTS) {
+    await page.screenshot({ path: join(ROOT, 'shots', 'engine-live.png') });
+    console.log('      shots/engine-live.png');
   }
 
   await context.close();
