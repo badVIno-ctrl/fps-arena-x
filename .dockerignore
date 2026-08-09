@@ -1,0 +1,18 @@
+# Everything the image does not need. This is a latency file, not a hygiene file:
+# the build context is uploaded before the first layer runs, and on a free plan
+# that upload is part of the deploy you are waiting on.
+.git
+.github
+node_modules
+.next
+out
+dist
+shots
+baseline
+*.png
+*.log
+__pycache__
+*.pyc
+.venv
+.DS_Store
+NEXT-STEPS.md

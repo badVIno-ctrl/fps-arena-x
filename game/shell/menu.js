@@ -101,7 +101,42 @@ const CSS = `
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.22'/></svg>");
 }
 .fa-wrap { position: relative; z-index: 1; max-width: 1160px; margin: 0 auto; padding: 56px 28px 40px; }
+.fa-top { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
 .fa-eyebrow { font-size: 11px; letter-spacing: .32em; color: var(--muted); }
+
+/* Relay status.
+ *
+ * This exists because of a specific failure the free tier produces: the service
+ * stops after 15 idle minutes, so the first visitor of the morning waits out a
+ * container pull with no idea whether anything is happening. The heartbeat in
+ * game/net/heartbeat.js already knows the answer, so the menu says it out loud
+ * instead of letting the player guess from a dead "НАЙТИ СОПЕРНИКА" button.
+ *
+ * The dot pulses only while waking — a permanent animation on a resting state is
+ * noise, and a status that is always moving stops meaning anything. */
+.fa-status {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; letter-spacing: .18em; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fa-status i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor; color: var(--muted);
+  box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 18%, transparent);
+}
+.fa-status[data-state="warm"] { color: var(--squad); }
+.fa-status[data-state="down"] { color: var(--duel); }
+.fa-status[data-state="waking"] { color: var(--solo); }
+/* Deliberately still.
+ *
+ * The obvious move here is a pulsing dot, and verify-shell.mjs forbids it: this
+ * screen holds a completely static backdrop so that nothing competes with the
+ * only thing that should move, which is the loading bar after a commit. A status
+ * seen once per session, already carrying its own sentence, gains nothing from a
+ * loop — so the transient state is drawn as a hollow ring instead of an animated
+ * one, and the difference is legible at a glance without moving a pixel. */
+.fa-status[data-state="waking"] i { background: transparent; box-shadow: inset 0 0 0 2px currentColor; }
+.fa-status[data-state="unknown"] i { opacity: .55; }
 .fa-mast {
   font-family: ${FONT_DISPLAY};
   font-size: clamp(40px, 8vw, 86px); line-height: .92; font-weight: 400;
@@ -205,6 +240,15 @@ export class ModeMenu {
     this.root = null;
     this._style = null;
     this._cards = new Map();
+
+    /**
+     * A promise from game/net/heartbeat.js `probe()`, or null when there is no
+     * relay to ask (capture runs, local development, offline). The menu never
+     * waits on it: bot mode does not need a server, so blocking the whole screen
+     * on a request that may take 45 seconds would be the wrong trade.
+     */
+    this._probe = o.serverProbe ?? null;
+    this.server = { state: 'unknown', players: null };
   }
 
   /**
@@ -225,7 +269,17 @@ export class ModeMenu {
     const root = el('div', 'fa-menu');
     const wrap = el('div', 'fa-wrap');
 
-    wrap.append(el('div', 'fa-eyebrow', 'БРАУЗЕРНЫЙ ТАКТИЧЕСКИЙ ШУТЕР'));
+    const top = el('div', 'fa-top');
+    top.append(el('div', 'fa-eyebrow', 'БРАУЗЕРНЫЙ ТАКТИЧЕСКИЙ ШУТЕР'));
+    this._status = el('div', 'fa-status');
+    this._status.append(el('i'));
+    this._statusText = el('span', null, 'ПРОВЕРКА СВЯЗИ');
+    this._status.append(this._statusText);
+    this._status.dataset.state = 'unknown';
+    top.append(this._status);
+    wrap.append(top);
+    this._watchServer();
+
     const mast = el('h1', 'fa-mast');
     mast.append('FPS ', el('b', null, 'ARENA'));
     wrap.append(mast);
@@ -306,6 +360,58 @@ export class ModeMenu {
     });
   }
 
+  /**
+   * Resolve the relay probe into one honest line of text.
+   *
+   * Four states, and each one changes what the player should do:
+   *   unknown  nothing has answered yet — the default, never alarming
+   *   waking   reachable but cold; an online match will start slowly
+   *   warm     reachable and up; player count is real, not decorative
+   *   down     no relay — bot mode still works, and the note says so
+   */
+  _watchServer() {
+    if (!this._probe) {
+      this._setServer('unknown', 'ЛОКАЛЬНЫЙ ЗАПУСК');
+      return;
+    }
+    this._setServer('waking', 'СЕРВЕР ОТВЕЧАЕТ…');
+    this._probe.then(
+      (res) => {
+        if (!this._status) return; // dismissed while the probe was in flight
+        if (!res || res.applicable === false) {
+          this._setServer('unknown', 'ЛОКАЛЬНЫЙ ЗАПУСК');
+          return;
+        }
+        if (!res.ok) {
+          this._setServer('down', 'СЕРВЕР НЕДОСТУПЕН');
+          return;
+        }
+        const players = res.body?.players_online;
+        this.server.players = typeof players === 'number' ? players : null;
+        if (res.coldStart) {
+          // Worth saying: this visitor woke the instance, so the first online
+          // match will feel slower than the next one.
+          this._setServer('waking', 'СЕРВЕР ТОЛЬКО ЧТО ПРОСНУЛСЯ');
+          return;
+        }
+        this._setServer(
+          'warm',
+          this.server.players === null
+            ? 'СЕРВЕР В СЕТИ'
+            : `В СЕТИ · ${this.server.players} ИГРОКОВ`,
+        );
+      },
+      () => this._setServer('down', 'СЕРВЕР НЕДОСТУПЕН'),
+    );
+  }
+
+  _setServer(state, text) {
+    this.server.state = state;
+    if (!this._status) return;
+    this._status.dataset.state = state;
+    this._statusText.textContent = text;
+  }
+
   _card(def) {
     const card = el('button', `fa-card${def.featured ? ' fa-featured' : ''}`);
     card.type = 'button';
@@ -342,6 +448,14 @@ export class ModeMenu {
       this._nick.focus();
       return;
     }
+    // A confirmed-dead relay means the online modes cannot work, and letting the
+    // player commit anyway buys them a loading bar that never finishes. Bot mode
+    // needs no server at all, hence the offer rather than a plain refusal.
+    if (this.mode !== 'bots' && this.server.state === 'down') {
+      this._note.textContent =
+        'Сервер не отвечает — сетевые режимы недоступны. Игра с ботами работает без сервера.';
+      return;
+    }
     this._start.disabled = true;
     this._start.textContent = this.mode === 'bots' ? 'ЗАГРУЗКА…' : 'ПОДКЛЮЧЕНИЕ…';
     if (this._bar) this._bar.style.display = 'block';
@@ -374,6 +488,11 @@ export class ModeMenu {
     this._style?.remove();
     this.root = null;
     this._style = null;
+    // The relay probe can outlive the menu by up to 45 seconds. Dropping the
+    // reference is what makes `_setServer` a no-op instead of a write into
+    // detached DOM.
+    this._status = null;
+    this._statusText = null;
   }
 }
 

@@ -1,0 +1,122 @@
+name: ci
+
+# Every gate in tools/ plus the two builds that can break a deploy. The point is
+# that `main` is always deployable: Render auto-deploys from it, so a red build
+# here is a broken game in production a minute later.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: node gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The gates import the engine's pure modules in plain node — no GPU, no
+      # DOM, no browser download. That is a design constraint of the codebase
+      # (see the header of game/modes/rules.js) and it is what makes CI fast.
+      - name: gates
+        run: pnpm test
+
+      - name: static export builds
+        run: pnpm exec next build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: export produced a usable tree
+        run: |
+          test -f out/index.html || { echo "out/index.html missing"; exit 1; }
+          test -d out/_next/static || { echo "out/_next/static missing"; exit 1; }
+          echo "export size: $(du -sh out | cut -f1)"
+
+  relay:
+    name: relay
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install -r server/requirements.txt
+
+      - name: keepalive unit tests
+        working-directory: server
+        run: python -m unittest discover -p 'test_*.py' -v
+
+      - name: relay imports and answers /healthz
+        working-directory: server
+        run: |
+          python - <<'PY'
+          import json, sys
+          from fastapi.testclient import TestClient
+          import main
+
+          with TestClient(main.app) as c:
+              h = c.get("/healthz")
+              assert h.status_code == 200, h.status_code
+              assert h.json()["ok"] is True
+              w = c.get("/api/wake")
+              assert w.status_code == 200, w.status_code
+              body = w.json()
+              assert "keepalive" in body and "uptime_s" in body
+              print(json.dumps(body, indent=2))
+          print("relay ok")
+          PY
+
+  docker:
+    name: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # Build the exact image Render will build. Doing it here means a broken
+      # Dockerfile is caught in CI rather than discovered as a failed deploy.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: fps-arena-x:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: container serves the game
+        run: |
+          docker run -d --name arena -p 10000:10000 -e PORT=10000 fps-arena-x:ci
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:10000/healthz > /tmp/h; then break; fi
+            sleep 2
+          done
+          cat /tmp/h; echo
+          curl -fsS http://127.0.0.1:10000/ | head -c 300; echo
+          docker logs arena | tail -20
+          docker rm -f arena

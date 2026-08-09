@@ -1,0 +1,63 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point it at this repository.
+# Everything below is what the free tier actually allows; nothing here needs a
+# paid plan, and nothing here needs editing before the first deploy.
+#
+# Why Docker and not the native Python runtime: the client has to be compiled by
+# Node and served by Python. Render's Python environment has no reliable Node,
+# and its Node environment has no Python, so a native runtime would force two
+# services — and two services on the free tier means two cold starts, two idle
+# timers, and a websocket on a different origin than the page that opens it.
+
+services:
+  - type: web
+    name: fps-arena-x
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: commit
+
+    # Render polls this endpoint. It is also what the keep-alive layers hit, so
+    # the path is deliberately the cheapest route in the process.
+    healthCheckPath: /healthz
+
+    envVars:
+      # ---- keep-alive (layer 1: in-process self-ping) -----------------------
+      # See server/keepalive.py for why the loop is idle-driven rather than
+      # unconditional, and why 600 s is the right threshold against Render's
+      # 15-minute spin-down.
+      - key: KEEPALIVE
+        value: "1"
+      - key: KEEPALIVE_PERIOD
+        value: "60"
+      - key: KEEPALIVE_IDLE
+        value: "600"
+      # Set to e.g. "5-23" to let the service sleep overnight and stretch the
+      # 750 free instance-hours across a 31-day month with room to spare.
+      - key: KEEPALIVE_WINDOW
+        sync: false
+
+      # RENDER_EXTERNAL_URL is injected by the platform, and the keep-alive reads
+      # it directly — there is nothing to configure here. KEEPALIVE_URL only
+      # exists to override it behind a custom domain.
+      - key: KEEPALIVE_URL
+        sync: false
+
+      # ---- match rules (relay is authoritative over these) ------------------
+      - key: PVP_MATCH_TARGET
+        value: "5"
+      - key: MATCH_KILL_LIMIT
+        value: "50"
+      - key: MATCH_TIME_LIMIT
+        value: "600"
+      - key: TEAM_MAX
+        value: "10"
+      - key: TEAM_RESPAWN_SECS
+        value: "5"
+      - key: RECONNECT_TTL
+        value: "60"
+      - key: ROOM_TTL
+        value: "3600"

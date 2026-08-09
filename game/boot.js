@@ -38,6 +38,7 @@ import { AudioSystem } from './audio/index.js';
 
 import { ModesSystem } from './modes/index.js';
 import { NetSystem, defaultSocketUrl } from './net/index.js';
+import { Heartbeat } from './net/heartbeat.js';
 import { ArsenalSystem } from './arsenal/index.js';
 import { ShellSystem } from './shell/index.js';
 import { ModeMenu, MatchResults } from './shell/menu.js';
@@ -101,6 +102,20 @@ export async function boot({ canvas } = {}) {
   // own frames, the driver advances exactly N of them through window.__PUMP__.
   const lockstep = capture && params.get('lockstep') === '1';
 
+  /**
+   * Keep the relay awake for as long as this tab is open — and start doing it
+   * BEFORE the menu, because sitting in the menu is the exact scenario the
+   * heartbeat exists for: no HTTP traffic, an idle timer running, and a player
+   * who is about to click "start" and find the server gone. See
+   * game/net/heartbeat.js and server/keepalive.py.
+   *
+   * A capture run gets none of this: the pixel gate must make no network
+   * requests at all or screenshots stop being reproducible.
+   */
+  const heartbeat = capture ? null : new Heartbeat();
+  heartbeat?.start();
+  const serverProbe = heartbeat ? heartbeat.probe() : Promise.resolve(null);
+
   // A capture run must never sit in front of a menu waiting for a click, so it
   // answers the menu itself from the query string.
   let choice;
@@ -114,7 +129,7 @@ export async function boot({ canvas } = {}) {
       menu: null,
     };
   } else {
-    const menu = new ModeMenu({ quality: params.get('q') ?? 'auto' });
+    const menu = new ModeMenu({ quality: params.get('q') ?? 'auto', serverProbe });
     choice = { ...(await menu.choose()), menu };
   }
 
@@ -246,6 +261,7 @@ export async function boot({ canvas } = {}) {
         engine.events.off?.('modes:over', onOver);
         results.hide();
         choice.menu?.dismiss?.();
+        heartbeat?.dispose();
         engine.dispose();
       } catch (err) {
         console.warn('[boot] dispose failed', err);

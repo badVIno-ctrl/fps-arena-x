@@ -27,15 +27,40 @@ import os
 import random
 import time
 import uuid
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from keepalive import PING_HEADER, KeepAlive
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# `npm run build` writes ../dist; in production the relay is the only server,
-# so it hosts the bundle itself instead of needing a second static host.
-DIST_DIR = os.environ.get("DIST_DIR") or os.path.join(os.path.dirname(BASE_DIR), "dist")
+PROJECT_DIR = os.path.dirname(BASE_DIR)
+
+
+def _find_static_dir() -> str:
+    """
+    Where the built client lives.
+
+    Three names are checked in order because the project has had three build
+    systems: `next build` with `output: 'export'` writes ../out, the Vite build
+    it grew out of wrote ../dist, and the Docker image stages the bundle at
+    /app/out. Checking rather than assuming is what lets the same file run under
+    `uvicorn main:app` on a laptop and unmodified in the container.
+    """
+    override = (os.environ.get("DIST_DIR") or "").strip()
+    if override:
+        return override
+    for candidate in ("out", "dist"):
+        path = os.path.join(PROJECT_DIR, candidate)
+        if os.path.isdir(path):
+            return path
+    return os.path.join(PROJECT_DIR, "out")
+
+
+DIST_DIR = _find_static_dir()
 
 ROOM_TTL = int(os.environ.get("ROOM_TTL", "3600"))
 TEAM_MAX = int(os.environ.get("TEAM_MAX", "10"))
@@ -46,7 +71,60 @@ RECONNECT_TTL = int(os.environ.get("RECONNECT_TTL", "60"))
 PVP_MATCH_TARGET = int(os.environ.get("PVP_MATCH_TARGET", "5"))
 NICK_MAX = 24
 
-app = FastAPI(title="FPS Arena X relay")
+keepalive = KeepAlive()
+BOOT_AT = time.time()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """
+    Lifespan rather than the deprecated `on_event` pair, and deliberately the
+    only place the keep-alive is switched on: a background task started at import
+    time would also start under the test client and inside `--reload` workers,
+    and you would have as many pingers as reloads.
+    """
+    await keepalive.start()
+    try:
+        yield
+    finally:
+        await keepalive.stop()
+
+
+app = FastAPI(title="FPS Arena X relay", lifespan=lifespan)
+
+# The JS bundle is the payload that decides whether a cold start feels instant or
+# broken, and it is highly compressible text. 500 bytes is the floor below which
+# the header overhead costs more than the saving.
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# Hashed asset filenames may be cached forever; the entry document may never be,
+# or a deploy would be invisible to everyone who already has a tab open.
+IMMUTABLE_PREFIXES = ("/_next/static/", "/assets/")
+NO_STORE_SUFFIXES = (".html", "/")
+
+
+@app.middleware("http")
+async def traffic_and_cache(request: Request, call_next):
+    """
+    Two jobs in one pass, because both need to see every request:
+
+      1. tell the keep-alive that a real visitor arrived, so it stays quiet while
+         the service is busy (see server/keepalive.py for why that matters to the
+         instance-hour budget);
+      2. attach cache headers, since StaticFiles alone will not distinguish a
+         content-hashed chunk from index.html.
+    """
+    if request.headers.get(PING_HEADER) != "1":
+        keepalive.note_inbound()
+
+    response: Response = await call_next(request)
+
+    path = request.url.path
+    if path.startswith(IMMUTABLE_PREFIXES):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif path.endswith(NO_STORE_SUFFIXES) or path == "":
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 # ----------------------------------------------------------------- utilities
@@ -239,6 +317,12 @@ def name_taken(nick: str) -> bool:
 
 @app.get("/healthz")
 async def healthz():
+    """
+    The cheapest useful endpoint in the process, and deliberately so: it is the
+    target of every keep-alive layer and of Render's own health check, so it runs
+    at least once a minute forever. No disk, no locks, no room sweep — four
+    `len()` calls on dicts already in memory.
+    """
     return JSONResponse(
         {
             "ok": True,
@@ -247,7 +331,36 @@ async def healthz():
             "squads": len(squads),
             "match_target": PVP_MATCH_TARGET,
             "kill_limit": MATCH_KILL_LIMIT,
-        }
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/wake")
+async def wake():
+    """
+    What the client asks before it starts downloading the bundle.
+
+    A cold start is not preventable, only survivable: the point of this endpoint
+    is that the browser can tell the difference between "the server is warm" and
+    "the server is booting and the first paint is 20 seconds away", and show the
+    player the truth instead of a blank screen. `uptime_s` under ~30 means the
+    visitor paid for a wake-up, which is also the signal that tells us whether
+    the keep-alive layers are earning their keep.
+    """
+    now = time.time()
+    return JSONResponse(
+        {
+            "ok": True,
+            "uptime_s": round(now - BOOT_AT, 1),
+            "cold_start": (now - BOOT_AT) < 30,
+            "keepalive": {
+                "layer1": keepalive.active,
+                **keepalive.stats.snapshot(now),
+            },
+            "players_online": len(lobby) + sum(len(s.team_of) for s in squads.values()),
+        },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -569,13 +682,17 @@ async def _cleanup(nick, duel: Duel | None, squad: Squad | None) -> None:
         asyncio.create_task(forget())
 
 
-# The SPA mount goes last so it cannot shadow /ws or /healthz.
+# The SPA mount goes last so it cannot shadow /ws, /healthz or /api/*.
 if os.path.isdir(DIST_DIR):
     app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="spa")
 else:
     @app.get("/")
     async def no_build():
         return JSONResponse(
-            {"error": "dist/ not found - run `npm run build` first", "looked_in": DIST_DIR},
+            {
+                "error": "client bundle not found - run `npm run build` first",
+                "looked_in": DIST_DIR,
+                "hint": "next build with output:'export' writes ./out",
+            },
             status_code=503,
         )

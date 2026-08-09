@@ -10,7 +10,7 @@
  *   node tools/verify-shell.mjs
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,6 +43,7 @@ function assert(cond, msg) {
 }
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
+const exists = (rel) => existsSync(join(ROOT, rel));
 
 const MENU = read('game/shell/menu.js');
 const MAIN = read('game/boot.js');
@@ -237,16 +238,64 @@ check('the page is described for a link preview', () => {
 check('the type system is loaded, not assumed to be installed', () => {
   // The HUD is drawn for condensed faces. Naming them in CSS only works on a Mac;
   // these have to be real webfonts or the interface silently degrades elsewhere.
-  assert(/next\/font\/google/.test(SHELL), 'no webfonts: condensed faces would only work on macOS');
+  //
+  // This check used to assert `next/font/google`, and that was the wrong
+  // invariant: next/font fetches the files from Google AT BUILD TIME, so it made
+  // every deploy depend on a third party being reachable from the build
+  // container — and when it is not, the build fails outright. The faces are now
+  // self-hosted, so what has to be true is stated directly.
+  const FONTS = read('app/fonts.css');
+  // Match the import statement, not the word. The comment above this file's
+  // font block explains why next/font/google was dropped, and a check that reads
+  // its own documentation as evidence fails on the explanation.
+  assert(
+    !/from\s+['"]next\/font\/google['"]/.test(SHELL),
+    'fonts are fetched from Google at build time again',
+  );
+
+  const faces = [...FONTS.matchAll(/@font-face\s*\{[^}]*\}/g)].map((m) => m[0]);
+  assert(faces.length >= 6, `only ${faces.length} @font-face rules`);
+
+  const families = new Set(
+    faces.map((f) => f.match(/font-family:\s*'([^']+)'/)?.[1]).filter(Boolean),
+  );
+  assert(families.size >= 3, `only ${families.size} font families declared`);
+
   for (const v of ['--font-display', '--font-body', '--font-mono']) {
-    assert(SHELL.includes(v), `${v} is never defined`);
+    assert(FONTS.includes(v), `${v} is never defined`);
   }
-  // Every string in this game is Russian.
-  const subsets = [...SHELL.matchAll(/subsets:\s*\[([^\]]*)\]/g)].map((m) => m[1]);
-  assert(subsets.length >= 3, `only ${subsets.length} font families configured`);
-  for (const s of subsets) {
-    assert(/cyrillic/.test(s), `a font is loaded without a cyrillic subset: [${s}]`);
+
+  // Every string in this game is Russian, so every family needs a cyrillic file.
+  for (const family of families) {
+    const own = faces.filter((f) => f.includes(`'${family}'`));
+    assert(
+      own.some((f) => /U\+0400-045F/.test(f)),
+      `${family} has no cyrillic range: russian text would fall back to system sans`,
+    );
+    assert(
+      own.some((f) => /U\+0000-00FF/.test(f)),
+      `${family} has no latin range`,
+    );
   }
+
+  // Two rules sharing family+weight with no unicode-range do not cooperate: the
+  // last one declared wins for ALL text. That is the specific bug this asserts
+  // against, because it looks like "the font just did not load".
+  for (const f of faces) {
+    assert(/unicode-range:/.test(f), `an @font-face has no unicode-range:\n${f.slice(0, 120)}`);
+  }
+
+  // A face that is referenced but not committed is a 404 at first paint.
+  const urls = [...FONTS.matchAll(/url\('\/fonts\/([^']+)'\)/g)].map((m) => m[1]);
+  assert(urls.length === faces.length, 'some @font-face rule has no src');
+  for (const file of urls) {
+    assert(exists(`public/fonts/${file}`), `public/fonts/${file} is referenced but missing`);
+  }
+
+  // The menu must paint in the right face without waiting on a discovery round
+  // trip; the display weight is what the masthead is set in.
+  assert(/rel="preload"/.test(SHELL), 'no font is preloaded, so the masthead swaps in late');
+  assert(/oswald-cyrillic-700/.test(SHELL), 'the masthead weight is not preloaded');
 });
 
 /* ===================================================== summary ========= */

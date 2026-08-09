@@ -1,0 +1,102 @@
+name: keepalive
+
+# Layer 2 of the anti-sleep design (layer 1 is server/keepalive.py, layer 3 is
+# game/net/heartbeat.js). This is the only layer that can WAKE a service that has
+# already been stopped, because it runs somewhere else.
+#
+# SETUP — one variable, no secrets:
+#   Settings -> Secrets and variables -> Actions -> Variables -> New
+#   Name: RENDER_URL      Value: https://<your-service>.onrender.com
+# Until it is set the job reports "not configured" and exits green, so a fresh
+# clone does not sit there failing.
+#
+# TWO THINGS TO KNOW ABOUT GITHUB CRON:
+#   * It is best-effort. Under load, runs are commonly minutes late — which is
+#     exactly why the interval is 10 minutes against a 15-minute spin-down and
+#     not 14 minutes against it.
+#   * Scheduled workflows are disabled automatically after 60 days without any
+#     commit to the repository. If the game goes quiet for two months, this stops
+#     silently. `workflow_dispatch` re-enables it, and layer 1 covers the gap for
+#     as long as the service happens to be awake.
+#
+# This costs nothing: Actions minutes are unmetered on public repositories.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A late run must never queue behind the previous one — the newest ping is the
+  # only one that matters.
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Wake the service
+        env:
+          URL: ${{ vars.RENDER_URL }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${URL:-}" ]; then
+            echo "::notice title=keepalive::RENDER_URL is not configured - nothing to ping."
+            echo "Set it under Settings > Secrets and variables > Actions > Variables."
+            exit 0
+          fi
+
+          target="${URL%/}/healthz"
+          echo "target: $target"
+
+          # A stopped free instance needs time to pull the image and import
+          # Python. The first attempt will often time out; that is the normal
+          # cold-start path, not a failure. Back off and give it a full minute.
+          attempt=0
+          max=5
+          delay=5
+          code=000
+          started=$(date +%s)
+
+          while [ $attempt -lt $max ]; do
+            attempt=$((attempt + 1))
+            code=$(curl -sS -o /tmp/body -w '%{http_code}' \
+                     --max-time 45 \
+                     -H 'x-fps-keepalive-source: github-actions' \
+                     -H 'Cache-Control: no-cache' \
+                     "$target" || echo 000)
+            echo "attempt $attempt/$max -> HTTP $code"
+            if [ "$code" = "200" ]; then break; fi
+            sleep $delay
+            delay=$((delay * 2))
+          done
+
+          elapsed=$(( $(date +%s) - started ))
+
+          if [ "$code" != "200" ]; then
+            echo "::error title=keepalive::$target unreachable after ${attempt} attempts (${elapsed}s), last status $code"
+            head -c 400 /tmp/body || true
+            exit 1
+          fi
+
+          echo "healthz ok in ${elapsed}s"
+          head -c 400 /tmp/body; echo
+
+          # /api/wake tells us whether this run actually paid for a wake-up. That
+          # is the measurement that says whether layer 1 is doing its job; if
+          # cold_start is true here regularly, the service is sleeping despite
+          # the self-ping and KEEPALIVE_WINDOW is the first thing to check.
+          if wake=$(curl -sS --max-time 20 "${URL%/}/api/wake"); then
+            echo "$wake" | head -c 600; echo
+            case "$wake" in
+              *'"cold_start":true'*)
+                echo "::warning title=keepalive::this run woke a stopped instance - it had been asleep" ;;
+              *) echo "instance was already warm" ;;
+            esac
+          fi
