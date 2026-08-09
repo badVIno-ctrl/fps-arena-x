@@ -177,7 +177,7 @@ export const MODEL_SPECS = {
     stockRear: mm(340),
     muzzleKind: 'brake',
     magZ: mm(-78),
-    magTilt: 0.16,
+    magTilt: 0.10,
     mag: mmAll({ w: 29, d: 69, len: 175, curve: 30 }),
     magSegs: 13,
     opticRise: mm(62),
@@ -222,7 +222,7 @@ export const MODEL_SPECS = {
     stockRear: mm(340),
     muzzleKind: 'comp',
     magZ: mm(-78),
-    magTilt: 0.16,
+    magTilt: 0.10,
     mag: mmAll({ w: 27.8, d: 66.2, len: 170, curve: 26 }),
     magSegs: 13,
     opticRise: mm(62),
@@ -700,13 +700,24 @@ export function nodesOf(spec) {
     },
     magDrop: [0, -0.4, isPump ? 0 : 0.02],
 
+    /**
+     * Where the charging handle sits, and it is a different mechanism per family
+     * rather than one node moved about — see the note in models/build.js.
+     *
+     * The SMG case is new: an MP5's handle is not on the receiver at all, it is on
+     * the cocking tube welded alongside the BARREL, well forward of the ejection
+     * port and on the LEFT. Putting it at the receiver's rear crest (the old
+     * fallback) is the one place on the weapon it certainly is not.
+     */
     chargeRest: isPistol
       ? { pos: [0, spec.bore + 0.006, spec.zUpperRear - 0.02], rot: [0, 0, 0] }
       : isAk
         ? { pos: [spec.rUpper + 0.006, spec.bore + 0.004, spec.zUpperRear - 0.03], rot: [0, 0, 0] }
         : isPump
           ? { pos: [0, spec.bore - spec.hgR, spec.handZ], rot: [0, 0, 0] }
-          : { pos: [0, spec.bore + spec.rUpper - 0.0075, spec.zUpperRear - 0.024], rot: [0, 0, 0] },
+          : spec.pattern === 'smg'
+            ? { pos: [-spec.rUpper * 0.72, spec.bore + spec.rUpper * 0.52, spec.hgZ1 - 0.016], rot: [0, 0, 0] }
+            : { pos: [0, spec.bore + spec.rUpper - 0.0075, spec.zUpperRear - 0.024], rot: [0, 0, 0] },
     chargePull: isPistol ? [0, 0, 0.026] : isPump ? [0, 0, 0.086] : [0, 0, 0.082],
 
     boltRest: { pos: [0, spec.bore, spec.zUpperRear - 0.034], rot: [0, 0, 0] },

@@ -934,6 +934,19 @@ export class Viewmodel {
       const inHand = res.active ? res.parts.mag : 0;
       this.magVisible = res.active ? res.parts.magVisible : true;
       p.magazine.visible = this.magVisible;
+      /**
+       * An extended magazine is the SAME part, longer.
+       *
+       * The arsenal used to express "extended magazine" by building a second,
+       * longer magazine body and hanging it off the weapon while this animated one
+       * stayed exactly as it was — so every weapon carried two magazines and the
+       * mounted one never moved. `magScaleProvider` is injected by the arsenal and
+       * returns the mounted magazine's length multiplier; the magazine is built
+       * with its origin at the feed lips and grows downward in -Y, so scaling Y is
+       * geometrically the right operation and the mouth stays seated.
+       */
+      const magScale = this.magScaleProvider?.() ?? 1;
+      if (Math.abs(p.magazine.scale.y - magScale) > 1e-4) p.magazine.scale.y = magScale;
       if (inHand > 1e-4) {
         // Follow the support hand: the magazine is gripped by its spine.
         this._magFromHand(w, p.magazine, inHand);

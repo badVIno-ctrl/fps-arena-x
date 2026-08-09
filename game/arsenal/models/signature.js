@@ -182,11 +182,14 @@ function akSafetyLever(body, spec, M) {
   const z = spec.portZ + 0.026;
   const y = spec.bore - 0.0092;
 
+  // Parkerised sheet, not brushed billet: at the board's light a 62 mm plate of
+  // `steel` was a bright slab across the middle of the receiver, which is where
+  // the eye lands. `soot` is the bank's dark ferrous finish.
   const paddle = box(0.0034, 0.0104, 0.062, 0.0009, 2);
-  put(body, paddle, M.steel, { x, y, z, rx: -0.24 });
+  put(body, paddle, M.soot, { x, y, z, rx: -0.24 });
   // The thumb tab, bent outboard at the rear.
   const tab = box(0.0062, 0.0096, 0.0142, 0.0011, 1);
-  put(body, tab, M.steel, { x: x + 0.0021, y: y - 0.0062, z: z + 0.031, ry: 0.2 });
+  put(body, tab, M.soot, { x: x + 0.0021, y: y - 0.0062, z: z + 0.031, ry: 0.2 });
   // Detent stops, stamped into the receiver wall above it.
   const stop = box(0.0022, 0.0038, 0.0058, 0.0005, 1);
   put(body, stop, M.soot, { x: x - 0.0008, y: y + 0.0132, z: z - 0.0212 });
@@ -563,16 +566,18 @@ function mp5CockingTube(body, spec, M) {
   put(body, seam, M.steel, { x: x * 0.52, y: y - 0.0026, z: (z0 + z1) / 2 });
 }
 
-/** The famous handle: a cranked lever at the front of the cocking tube. */
-function mp5Slap(body, spec, M) {
-  const x = -spec.rUpper * 0.72;
-  const y = spec.bore + spec.rUpper * 0.52;
-  const z = spec.hgZ1 - 0.016;
-  const arm = box(0.0072, 0.0132, 0.0182, 0.0011, 1);
-  put(body, arm, M.steel, { x, y, z });
-  const paddle = box(0.0212, 0.0112, 0.0132, 0.0018, 2);
-  put(body, paddle, M.steel, { x: x - 0.0112, y, z: z - 0.0021, rz: -0.22 });
-}
+/**
+ * The famous slap handle is a MOVING part, not body geometry.
+ *
+ * It was built here first, statically, and that made it a handle welded to the
+ * tube — you could not slap it. It now lives in `buildMovingParts` in build.js and
+ * rides `chargeRest` / `chargePull` like every other charging handle, which is
+ * also what lets the reload clips animate it.
+ *
+ * The feature string is kept so the spec still declares the mechanism, and so the
+ * gate that pairs features against builders does not report it missing.
+ */
+function mp5Slap() {}
 
 /**
  * The drum rear sight: a rotating cylinder with four apertures, standing on a

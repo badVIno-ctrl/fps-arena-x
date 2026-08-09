@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node tools/verify.mjs && node tools/verify-models.mjs && node tools/verify-hardware.mjs && node tools/verify-gunsmith.mjs && node tools/verify-loadout.mjs && node tools/verify-arena.mjs && node tools/verify-modes.mjs && node tools/verify-net.mjs && node tools/verify-ballistics.mjs && node tools/verify-shell.mjs && node tools/verify-deploy.mjs",
+    "test": "node tools/verify.mjs && node tools/verify-models.mjs && node tools/verify-hardware.mjs && node tools/verify-gunsmith.mjs && node tools/verify-loadout.mjs && node tools/verify-condition.mjs && node tools/verify-arena.mjs && node tools/verify-modes.mjs && node tools/verify-net.mjs && node tools/verify-ballistics.mjs && node tools/verify-shell.mjs && node tools/verify-deploy.mjs",
     "test:relay": "cd server && python3 -m unittest discover -p 'test_*.py'",
     "test:visual": "node tools/verify-visual.mjs"
   },

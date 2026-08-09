@@ -126,6 +126,14 @@ export class UiSystem {
       fireMode: 'AUTO',
       lethalCount: 2,
       tacticalCount: 1,
+      medicalCount: 1,
+      /** 0..1 while a grenade is cooking, and while a medkit is being applied. */
+      cook: 0,
+      healing: 0,
+      /** Weapon condition. See weapons/condition.js. */
+      heat: 0,
+      wear: 0,
+      jammed: false,
       move: 0,
       sprint: false,
       crouch: false,
@@ -462,8 +470,26 @@ export class UiSystem {
       if (ws.reloadProgress !== undefined) s.reloadProgress = ws.reloadProgress;
       if (ws.ads !== undefined) s.ads = !!ws.ads;
       if (ws.spread !== undefined) s.baseSpread = 4 + ws.spread * 40;
+      if (ws.heat !== undefined) s.heat = ws.heat;
+      if (ws.wear !== undefined) s.wear = ws.wear;
+      if (ws.jammed !== undefined) s.jammed = !!ws.jammed;
       if (ws.lethalCount !== undefined) s.lethalCount = ws.lethalCount;
       if (ws.tacticalCount !== undefined) s.tacticalCount = ws.tacticalCount;
+    }
+
+    /**
+     * Grenade and medkit counts come from `gear`, which owns them, rather than
+     * from the weapon system that happened to expose two numbers named after them.
+     * The HUD has drawn `lethalCount` / `tacticalCount` since it was written; they
+     * were simply never connected to anything that could change them.
+     */
+    const gear = ctx.peek('gear');
+    if (gear?.state) {
+      s.lethalCount = gear.state.lethal;
+      s.tacticalCount = gear.state.tactical;
+      s.medicalCount = gear.state.medical;
+      s.cook = gear.state.cook;
+      s.healing = gear.state.healing;
     }
 
     const ps = s.simulate ? null : this._playerState();

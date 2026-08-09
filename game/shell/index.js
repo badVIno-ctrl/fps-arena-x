@@ -167,6 +167,21 @@ export class ShellSystem {
       this.screen.render();
     };
 
+    /**
+     * The bench, as an F interactable. `at()` is evaluated per frame rather than
+     * captured, because a future map will place the bench from data.
+     */
+    this._usePoint = new THREE.Vector3();
+    this._offUse = ctx.peek('gear')?.registerInteractable?.({
+      id: 'gunsmith-bench',
+      at: () => this.bench.interactPoint(this._usePoint),
+      radius: 2.6,
+      prompt: 'ДОСКА ОРУЖИЯ',
+      sub: 'Настроить обвес и снаряжение',
+      enabled: () => !this.screen.open,
+      onUse: () => this.openGunsmith(),
+    });
+
     this.screen.resize(window.innerHeight || 1080);
     this._paused = false;
     this._last = performance.now();
@@ -320,27 +335,26 @@ export class ShellSystem {
     const rawDt = Math.min(0.1, (now - this._last) / 1000);
     this._last = now;
 
-    if (!this.screen.open) {
-      const player = ctx.peek('player');
-      const pos = player?.getHudState?.()?.position ?? player?.position ?? null;
-      const prox = this.bench.proximity(pos);
-      const ui = ctx.peek('ui');
-      if (prox.near) {
-        ui?.setPrompt?.({
-          key: 'F',
-          text: 'ДОСКА ОРУЖИЯ',
-          sub: 'Нас��роить обвес',
-        });
-        if (ctx.input?.pressed?.('KeyF')) this.openGunsmith();
-      } else if (prox.left) {
-        ui?.clearPrompt?.();
-      }
-    }
-
+    /**
+     * F IS NOT OURS TO READ.
+     *
+     * This used to watch the raw `KeyF` itself and paint its own prompt, which
+     * worked only because the bench was the single interactable in the game. A
+     * second one — a door, an ammo crate, a downed teammate — would have meant two
+     * subsystems acting on one keypress with nothing to arbitrate, and two prompts
+     * fighting over the same corner of the screen.
+     *
+     * The bench is registered with `gear` (see gear/index.js
+     * `registerInteractable`) at init instead, and the nearest interactable wins.
+     * The proximity maths still lives here, because where the bench is is the
+     * shell's business.
+     */
     this.screen.update(rawDt);
   }
 
   dispose() {
+    this._offUse?.();
+    this._offUse = null;
     // Put the render call back before anything else: a half-disposed screen must
     // never be reachable from the render phase.
     if (this._originalRender && this.render) {

@@ -78,6 +78,26 @@ export class AmmoPanel {
     this.pips = new Array(MAX_PIPS);
     for (let i = 0; i < MAX_PIPS; i++) this.pips[i] = el('b', null, this.mag);
 
+    /**
+     * CONDITION — the heat bar, the wear pip and the stoppage warning.
+     *
+     * Heat and wear both change how the weapon behaves (see
+     * weapons/condition.js), and a weapon that has quietly become inaccurate and
+     * cannot say so is a weapon the player concludes is broken. So the bar is not
+     * a decoration: it is the only channel through which the mechanic can be
+     * learnt.
+     *
+     * Drawn under the magazine strip, i.e. in the one place the player is already
+     * looking when they think about ammunition — which is exactly when they should
+     * be thinking about heat.
+     */
+    this.cond = el('div', 'ow-cond', this.root);
+    const heatBar = el('div', 'ow-heat', this.cond);
+    this.heatFill = el('i', null, heatBar);
+    this.wearNum = el('div', 'ow-wear', this.cond, '');
+    this.jam = el('div', 'ow-jam', this.root, 'ЗАКЛИНИЛО — R');
+    setStyle(this.jam, 'display', 'none');
+
     this.reload = el('div', 'ow-reload', this.root, 'ПЕРЕЗАРЯДКА');
     const bar = el('div', 'ow-reload-bar', this.root);
     this.reloadFill = el('i', null, bar);
@@ -166,6 +186,21 @@ export class AmmoPanel {
     }
     setStyle(this.reloadBar, 'display', reloading ? '' : 'none');
     if (reloading) setStyle(this.reloadFill, 'transform', `scaleX(${reloadP.toFixed(3)})`);
+
+    // --- condition --------------------------------------------------------
+    const heat = clamp01(s.heat ?? 0);
+    const wear = clamp01(s.wear ?? 0);
+    // Hidden entirely while cold and fresh: a bar that is always on screen at zero
+    // teaches the player to ignore it, and then it cannot warn them.
+    const condVis = heat > 0.05 || wear > 0.12;
+    setStyle(this.cond, 'display', condVis ? '' : 'none');
+    if (condVis) {
+      setStyle(this.heatFill, 'transform', `scaleX(${heat.toFixed(3)})`);
+      setClass(this.heatFill, 'hot', heat > 0.7);
+      setText(this.wearNum, wear > 0.12 ? `ИЗНОС ${Math.round(wear * 100)}%` : '');
+      setClass(this.wearNum, 'bad', wear > 0.6);
+    }
+    setStyle(this.jam, 'display', s.jammed ? '' : 'none');
 
     // --- equipment --------------------------------------------------------
     const lc = s.lethalCount ?? 0;

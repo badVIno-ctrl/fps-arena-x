@@ -1100,13 +1100,33 @@ export function buildMagazine(asm, mats, o) {
   const segs = o.segs ?? 8;
   const poly = o.poly ?? 'polymer';
 
-  // Arc: y runs down, z bows forward (-Z), and each slice is rotated to the
-  // local tangent so the stack reads as one continuous curved body.
-  const at = (t) => ({
-    y: -t * len,
-    z: -curve * t * t,
-    tilt: Math.atan2(2 * curve * t, len),
-  });
+  /**
+   * THE FEED CURVE — a circular arc, not a parabola.
+   *
+   * `z = -curve * t^2` puts nearly all of the bend in the bottom third, so the
+   * body read as a straight box with a kink above the floor plate. A real magazine
+   * follows the round stack, which is a CONSTANT-RADIUS arc: the bend is spread
+   * evenly and the whole thing reads as one continuous curved object. On an АКМ,
+   * where the sagitta is 30 mm over 175 mm, that is the difference between a
+   * banana and a bent stick — and the banana is one of the loudest shape cues the
+   * weapon has.
+   *
+   * Two boundary conditions fix the arc completely, and both of them are physical:
+   *
+   *   at t=0 the stack leaves the feed lips VERTICALLY, because the lips are
+   *          square in the magwell;
+   *   at t=1 it has descended `len` and moved `curve` forward.
+   *
+   * Those give tan(theta/2) = curve/len for the total sweep, and R = len/sin(theta).
+   * The spec numbers keep their old meaning — `curve` is still the forward offset
+   * of the floor plate — so no magazine changes size, only its shape.
+   */
+  const sweep = 2 * Math.atan2(Math.max(1e-6, curve), Math.max(1e-6, len));
+  const R = len / Math.max(1e-6, Math.sin(sweep));
+  const at = (t) => {
+    const a = sweep * t;
+    return { y: -R * Math.sin(a), z: -R * (1 - Math.cos(a)), tilt: a };
+  };
 
   const bodyParts = [];
   const ribParts = [];

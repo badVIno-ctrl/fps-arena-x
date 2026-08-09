@@ -40,6 +40,7 @@ import { ModesSystem } from './modes/index.js';
 import { NetSystem, defaultSocketUrl } from './net/index.js';
 import { Heartbeat } from './net/heartbeat.js';
 import { ArsenalSystem } from './arsenal/index.js';
+import { GearSystem } from './gear/index.js';
 import { ShellSystem } from './shell/index.js';
 import { ModeMenu, MatchResults } from './shell/menu.js';
 
@@ -65,6 +66,7 @@ const STEP_LABELS = {
   modes: 'РЕЖИМ БОЯ',
   net: 'СЕТЬ',
   arsenal: 'АРСЕНАЛ',
+  gear: 'СНАРЯЖЕНИЕ',
   shell: 'ВЕРСТАК',
   audio: 'ЗВУК',
 };
@@ -160,6 +162,7 @@ export async function boot({ canvas } = {}) {
     .add(ModesSystem)
     .add(NetSystem)
     .add(ArsenalSystem)
+    .add(GearSystem)
     .add(ShellSystem)
     .add(AudioSystem);
 

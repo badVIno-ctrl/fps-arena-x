@@ -134,6 +134,13 @@ export class ArsenalSystem {
      * empty. Now it asks the mounted unit.
      */
     wp.viewmodel.opticProvider = () => this.activeRig()?.opticGlass() ?? null;
+    /**
+     * And the magazine's length. The rig no longer builds a second magazine body
+     * (there used to be two on every weapon — see buildMagazineUnit); the mounted
+     * magazine's only geometric consequence is how far the animated one hangs
+     * below the magwell.
+     */
+    wp.viewmodel.magScaleProvider = () => this.activeRig()?.magScale() ?? 1;
 
     /**
      * WHAT THE PLAYER CARRIES.
@@ -274,7 +281,10 @@ export class ArsenalSystem {
       delete this.weapons.carriedIds;
       delete this.weapons.resolvedStats;
       delete this.weapons.sightPoint;
-      if (this.weapons.viewmodel) this.weapons.viewmodel.opticProvider = null;
+      if (this.weapons.viewmodel) {
+        this.weapons.viewmodel.opticProvider = null;
+        this.weapons.viewmodel.magScaleProvider = null;
+      }
     }
   }
 }

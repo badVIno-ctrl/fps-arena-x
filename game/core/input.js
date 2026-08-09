@@ -22,6 +22,10 @@ export const ACTIONS = {
   leanRight: ['KeyE'],
   swapWeapon: ['Digit1', 'Digit2', 'Tab'],
   grenade: ['KeyG'],
+  /** Secondary throwable (flashbang / smoke). */
+  tactical: ['KeyH'],
+  /** Field medicine. See gear/index.js MEDICAL. */
+  heal: ['KeyX'],
   // Both keys are live for the weapon light. `KeyT` was declared here from the
   // start but nothing ever read the action, while arsenal separately hardcoded
   // the raw `KeyN`, so N is the one players have actually been pressing. Neither

@@ -240,6 +240,15 @@ async function hardware() {
     assert(/visible = false/.test(un), 'unmount should hide, not destroy');
     assert(!/dispose\(\)/.test(un), 'unmount must not dispose: the player swaps back constantly');
   });
+  check('a magazine unit builds no magazine: there is only the animated one', () => {
+    assert(
+      !/buildMagazine\(/.test(buildCode),
+      'the attachment builder builds a magazine body: it will stack with the model\'s ' +
+        'animated magazine, which is what put two magazines on every weapon',
+    );
+    assert(/magScale/.test(buildCode), 'a magazine unit must publish its length scale');
+    assert(/magScale\(\)/.test(rigCode), 'the rig must expose magScale() for the viewmodel');
+  });
   check('dispose hands back the beam, the dot, the cache and the lights', () => {
     const fn = rigCode.slice(rigCode.indexOf('dispose() {'));
     for (const needle of ['beam', 'dot', 'cache.clear()', 'lights']) {
@@ -249,7 +258,18 @@ async function hardware() {
   });
   check('the builder uses the base parts kit and cleans up after itself', () => {
     assert(buildCode.length > 0, 'build.js is missing');
-    for (const fn of ['addRail(', 'addMuzzleDevice(', 'buildOptic(', 'buildMiniReflex(', 'buildMagazine(', 'addForeGrip(']) {
+    /**
+     * `buildMagazine(` is deliberately NOT in this list any more.
+     *
+     * It used to be, and that requirement was itself the bug: the rig built a
+     * complete magazine body while the weapon MODEL also built one as a moving
+     * part, because the magazine has to fall out during a reload. Every weapon in
+     * the game therefore carried two magazines, 26 mm apart, in different
+     * materials — measured on the АКМ with tools/lab/census.mjs. A mountable thing
+     * has to be exactly one thing, so the magazine is now only the animated part
+     * and the rig publishes a length scale for it instead.
+     */
+    for (const fn of ['addRail(', 'addMuzzleDevice(', 'buildOptic(', 'buildMiniReflex(', 'addForeGrip(']) {
       assert(buildCode.includes(fn), `builder never calls ${fn}`);
     }
     const disposes = (buildCode.match(/\.dispose\(\)/g) || []).length;

@@ -290,6 +290,19 @@ export class HardwareRig {
   }
 
   /**
+   * How much longer the mounted magazine is than the standard one.
+   *
+   * The rig deliberately builds no magazine geometry (see `buildMagazineUnit`):
+   * there is exactly one magazine and it is the model's animated part, because a
+   * magazine that does not drop out during a reload is not a magazine. So the
+   * difference an extended magazine makes is published as a scale and applied to
+   * the real part by the viewmodel.
+   */
+  magScale() {
+    return this.mounted.magazine?.magScale ?? 1;
+  }
+
+  /**
    * The mounted optic's GLASS, for the collimated reticle.
    *
    * The viewmodel draws a red dot by projecting the tube axis from the eye and

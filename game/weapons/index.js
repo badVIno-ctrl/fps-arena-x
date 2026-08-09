@@ -9,6 +9,7 @@ import { buildRifle } from './models/rifle.js';
 import { buildSmg } from './models/smg.js';
 import { buildPistol } from './models/pistol.js';
 import { clamp, clamp01, lerp, damp, DEG } from './mathx.js';
+import { WeaponCondition, HEAT, WEAR } from './condition.js';
 
 /**
  * WEAPONS — weapon meshes, the first-person viewmodel rig, ADS, recoil, sway,
@@ -143,6 +144,8 @@ export class WeaponSystem {
     this._hudState = {
       name: '', mode: 'auto', ammo: 0, reserve: 0, magSize: 0,
       reloading: false, reloadProgress: 0, ads: false, spread: 0, firing: false,
+      /** See weapons/condition.js. 0..1 each; `jammed` is a stoppage. */
+      heat: 0, wear: 0, jammed: false, heatWarn: false,
     };
   }
 
@@ -278,8 +281,17 @@ export class WeaponSystem {
   }
 
   /** Current spread cone half-angle in degrees — the crosshair should use this. */
+  /**
+   * The live cone half-angle, in degrees, AS FIRED.
+   *
+   * Heat and wear multiply it here rather than at the point of fire, so the
+   * crosshair and the bullet always agree: `ui` drives the reticle gap off this
+   * getter and `tryFire` reads the same number. Splitting them is how a game ends
+   * up with a crosshair that lies.
+   */
   get spreadDegrees() {
-    return this._spread;
+    const mods = this.state?.condition?.modifiers;
+    return mods ? this._spread * mods.spread : this._spread;
   }
 
   muzzleWorld(out) {
@@ -313,8 +325,18 @@ export class WeaponSystem {
     h.ads = (vm?.adsT ?? 0) > 0.5;
     // `ui` maps this to reticle bloom as 4 + spread * 40 px, so hand it a
     // normalised 0..1 rather than raw degrees.
-    h.spread = Math.min(1, Math.max(0, this._spread / 6));
+    h.spread = Math.min(1, Math.max(0, this.spreadDegrees / 6));
     h.firing = this.firing;
+    /**
+     * Condition. Heat and wear both change how the weapon behaves, so both have to
+     * be legible — a gun that has quietly become inaccurate and cannot say so is a
+     * gun the player concludes is broken.
+     */
+    const cond = s.condition;
+    h.heat = cond?.heat ?? 0;
+    h.wear = cond?.wear ?? 0;
+    h.jammed = !!cond?.jammed;
+    h.heatWarn = !!cond?.modifiers?.warn;
     return h;
   }
 
@@ -375,10 +397,37 @@ export class WeaponSystem {
   }
 
   /** One round leaves the barrel. Returns false if the trigger clicked dry. */
+  /**
+   * The condition of the weapon in hand: heat, wear, and any stoppage.
+   *
+   * Lazily attached to the weapon STATE rather than to the system, because the
+   * state belongs to the object. Switching to your pistol has to let the rifle
+   * cool, and coming back to a rifle you emptied has to find it still hot — a
+   * per-player scalar would make weapon switching a free coolant. See
+   * weapons/condition.js.
+   */
+  conditionFor(state = this.state) {
+    if (!state) return null;
+    state.condition ??= new WeaponCondition({ mass: state.def.weight, rpm: state.def.rpm });
+    return state.condition;
+  }
+
+  get condition() {
+    return this.conditionFor();
+  }
+
   tryFire() {
     const s = this.state;
     if (!s) return false;
     if (this.reloading || this.switching || this._fireTimer > 0) return false;
+    /**
+     * A STOPPAGE. Not a refusal to fire and nothing else: the bolt is stuck, so
+     * the player has to clear it, which is why `_fireTimer` is not touched here —
+     * `update()` runs the clock down and the HUD says why nothing is happening.
+     * A weapon that can never fail has no reason to be maintained.
+     */
+    const cond = this.conditionFor(s);
+    if (cond.jammed) return false;
     // Muzzle in a wall: refuse before the dry-fire branch below, so a blocked
     // shot does not lock the bolt back as if the magazine had run out.
     if (this._wallPress >= WALL_PRESS.blockFire) return false;
@@ -412,7 +461,10 @@ export class WeaponSystem {
     cam.updateMatrixWorld();
     this._camDir.set(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
     this._dir.copy(this._camDir);
-    const spreadRad = this._spread * DEG;
+    // `spreadDegrees`, not `_spread`: the cone the round actually flies in
+    // includes heat and wear, and it is the same number the crosshair is drawn
+    // from.
+    const spreadRad = this.spreadDegrees * DEG;
     if (spreadRad > 1e-5) {
       const d = this.rng.disc(this._disc ?? (this._disc = { x: 0, y: 0 }));
       this._right.set(1, 0, 0).applyQuaternion(cam.quaternion);
@@ -480,7 +532,20 @@ export class WeaponSystem {
       p.addRecoil(pitch, yaw, def.recoil.roll * 0.35, def.recoil.punch);
     }
     this._spread = Math.min(def.spreadMax, this._spread + def.spreadPerShot);
-    this._fireTimer = 60 / def.rpm;
+    /**
+     * Heat and wear are applied HERE, on the shot, and their effect on cadence is
+     * folded into the rate limiter rather than into the definition. A hot action
+     * drags: 6% slower at full heat, which is felt as the burst losing its edge
+     * rather than as the gun changing rate.
+     */
+    const jammed = cond.shoot(() => this.rng.float());
+    const mods = cond.modifiers;
+    this._fireTimer = (60 / def.rpm) * mods.cadence;
+    if (jammed) {
+      // The round that jams still leaves the barrel; the NEXT one does not.
+      this.viewmodel.boltHold = 1;
+      this.ctx.events.emit('weapon:jam', { weapon: def, wear: cond.wear });
+    }
     this._sinceShot = 0;
     this.stats.fired++;
     this._pendingShots++;
@@ -746,6 +811,19 @@ export class WeaponSystem {
     this._sinceShot += dt;
     if (this._fireTimer > 0) this._fireTimer -= dt;
     if (this._burstCooldown > 0) this._burstCooldown -= dt;
+
+    /**
+     * EVERY weapon cools, not just the one in hand.
+     *
+     * A rifle you emptied and holstered has to still be hot when you come back to
+     * it, and it has to cool while it is on your back. Ticking only `this.state`
+     * would make switching weapons a free coolant and switching back a free
+     * repair.
+     */
+    for (const st2 of this.states.values()) {
+      if (st2.condition) st2.condition.update(dt);
+      else if (st2 === s) this.conditionFor(s).update(dt);
+    }
 
     // ---- spread recovery -------------------------------------------------
     const rest = this._restSpread(def, player, st);

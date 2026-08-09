@@ -270,12 +270,38 @@ const CSS = `
 }
 .ow-sh-num {
   margin-left:auto;
-  font: 700 calc(13px * var(--k))/1 var(--font-mono), ui-monospace, monospace;
+  font: 700 calc(13px * var(--k))/1 var(--fm), ui-monospace, monospace;
   color:#e6f6ff; font-variant-numeric: tabular-nums; text-shadow: var(--o1);
 }
 .ow-shield.warn .ow-sh-icon { background: linear-gradient(180deg,#ffe6b0,#f5a524); box-shadow: 0 0 calc(8px * var(--k)) rgba(245,165,36,.6); }
 .ow-shield.warn .ow-sh-lbl,
 .ow-shield.warn .ow-sh-num { color:#ffd79a; }
+
+/* Weapon condition: a heat bar and a wear percentage under the magazine strip.
+   Both hidden entirely while cold and fresh — a bar that is always on screen at
+   zero teaches the player to ignore it, and then it cannot warn them. */
+.ow-cond { display:flex; align-items:center; gap: calc(var(--u) * 1.2); margin-top: calc(var(--u) * 1.2); }
+.ow-heat {
+  flex:1; height: calc(3px * var(--k));
+  background: rgba(5,9,12,.7);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.5);
+  position:relative; overflow:hidden;
+}
+.ow-heat i {
+  position:absolute; inset:0; transform-origin:left center; transform:scaleX(0);
+  background: linear-gradient(90deg, #f5a524, #ff6a2a);
+}
+.ow-heat i.hot { background: linear-gradient(90deg, #ff6a2a, #ff2d1a); }
+.ow-wear {
+  font: 700 calc(9px * var(--k))/1 var(--fm), ui-monospace, monospace;
+  letter-spacing:.14em; color: rgba(147,161,180,.85); text-shadow: var(--o1);
+}
+.ow-wear.bad { color:#ffb08a; }
+.ow-jam {
+  font-size: calc(11px * var(--k)); letter-spacing:.2em; font-weight:700;
+  color:#ff7a68; text-shadow: var(--o1), 0 0 calc(7px * var(--k)) rgba(224,36,20,.5);
+  margin-top: calc(var(--u) * 1.2);
+}
 
 /* armour: thinner, cyan, plate-segmented, its own label */
 .ow-armour {

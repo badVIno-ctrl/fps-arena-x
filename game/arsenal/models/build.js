@@ -1,4 +1,4 @@
-import { Assembly, box, blob, dome, extrude, roundRect, latheZ, rodZ, tubeZ, knurlBand } from '../../weapons/geometry.js';
+import { Assembly, box, blob, dome, extrude, roundRect, latheZ, rodZ, tubeZ, knurlBand, serrations } from '../../weapons/geometry.js';
 import {
   addBarrel,
   addGasBlock,
@@ -159,8 +159,17 @@ function buildReceiver(body, spec) {
   }
 
   if (spec.pattern === 'ak' || spec.pattern === 'dmr') {
-    // Dust cover: a pressed steel lid with two stiffening ribs, sitting on top
-    // of the receiver where an AR would have its rail.
+    /**
+     * Dust cover: a pressed steel lid with two stiffening ribs, sitting on top of
+     * the receiver where an AR would have its rail.
+     *
+     * BLUED, not brushed. This was `steel` (metal_brushed, 0.115 albedo) and on the
+     * board's studio light a 240 mm cylinder of it was the brightest object on the
+     * weapon — the АКМ appeared to have a chrome receiver top. A Kalashnikov's
+     * cover is phosphated or blued sheet: dark, with one narrow highlight along the
+     * crest. Same reasoning as the barrel above, and the two now match, which they
+     * do on the real weapon too.
+     */
     const cover = latheZ(
       [
         [0, spec.rUpper * 0.5],
@@ -171,11 +180,11 @@ function buildReceiver(body, spec) {
       ],
       14
     );
-    body.add(cover, M.steel, { y: spec.bore, z: spec.zUpperFront + 0.004 });
+    body.add(cover, M.soot, { y: spec.bore, z: spec.zUpperFront + 0.004 });
     cover.dispose();
     for (let i = 0; i < 2; i++) {
       const rib = box(0.0032, 0.0022, L.receiverLen - 0.02, 0.0005, 1);
-      body.add(rib, M.steel, {
+      body.add(rib, M.soot, {
         x: (i ? 1 : -1) * spec.rUpper * 0.52,
         y: spec.bore + spec.rUpper * 0.86,
         z: (spec.zUpperRear + spec.zUpperFront) / 2,
@@ -184,7 +193,7 @@ function buildReceiver(body, spec) {
     }
     // Side rail for the optic mount — the real AK optic interface.
     const rail = box(0.0092, 0.0182, 0.062, 0.0009, 2);
-    body.add(rail, M.steel, {
+    body.add(rail, M.soot, {
       x: -spec.rUpper - 0.005,
       y: spec.bore + 0.014,
       z: spec.opticZ,
@@ -214,10 +223,24 @@ function buildReceiver(body, spec) {
 
 /* -------------------------------------------------------------------- barrel */
 
+/**
+ * Barrel material.
+ *
+ * `steel` is `metal_brushed` at 0.115 albedo, and on the board's studio light a
+ * 300 mm cylinder of it becomes the brightest object on the weapon — the АКМ read
+ * as having a chrome barrel. Real barrels are BLUED or nitrided: dark, with a
+ * narrow specular highlight along the top. `steel_soot` is the bank's dark ferrous
+ * finish and is what the muzzle devices already use, so the barrel matching them
+ * is also more correct than the barrel matching the receiver.
+ */
+function barrelMat(spec) {
+  return spec.pattern === 'pistol' ? M.steel : M.soot;
+}
+
 function buildBarrelGroup(body, spec) {
   const L = layoutOf(spec);
 
-  addBarrel(body, M.steel, M.cavity, {
+  addBarrel(body, barrelMat(spec), M.cavity, {
     y: spec.bore,
     zBreech: spec.zBreech,
     zMuzzle: spec.zBarrelEnd,
@@ -244,7 +267,7 @@ function buildBarrelGroup(body, spec) {
   if (spec.pattern === 'ak' || spec.pattern === 'dmr') {
     // The gas tube: the single most recognisable line on an AK's silhouette.
     const tube = tubeZ(0.0082, 0.0064, Math.abs(spec.gasAt - spec.hgZ0) + 0.03, 14, 0.0004);
-    body.add(tube, M.steel, {
+    body.add(tube, barrelMat(spec), {
       y: spec.bore + spec.rBarrel + 0.0112,
       z: (spec.gasAt + spec.hgZ0) / 2,
     });
@@ -418,13 +441,15 @@ function buildGripAndStock(body, spec) {
      * Built from three tapering segments plus the plate, because a single box
      * cannot taper and the taper is the identity.
      */
-    const segs = 3;
+    // Five segments, not three: at three the taper reads as a staircase, which is
+    // a worse defect than the slab it replaced.
+    const segs = 5;
     for (let i = 0; i < segs; i++) {
       const t = (i + 0.5) / segs;
       // Deep at the receiver (58 mm), waisted at 0.55, flaring to 66 mm at the toe.
       const h = 0.058 * (1 - t * 0.34) + 0.028 * t * t;
       const w = 0.031 * (1 - t * 0.1);
-      const seg = box(w, h, (len / segs) * 1.06, 0.0035, 2);
+      const seg = box(w, h, (len / segs) * 1.08, 0.0035, 2);
       body.add(seg, furnitureMat(spec), {
         y: spec.bore - 0.022 - t * 0.014,
         z: spec.zUpperRear + len * ((i + 0.5) / segs),
@@ -571,10 +596,52 @@ function buildMovingParts(spec) {
     });
   }
 
+  /**
+   * THE CHARGING HANDLE, PER FAMILY.
+   *
+   * `chargingHandlePart()` builds an AR-15 charging handle: a T-bar with a latch
+   * and three pairs of grip ridges. Every weapon got one, so an АКМ wore an AR
+   * charging handle bolted to the right of its receiver — and because the ridges
+   * are bright steel catching the key light, it was the single most prominent
+   * object on the weapon. Identified with tools/lab/census.mjs rather than guessed
+   * at: `akm-charging-alu`, x -33..24, hanging 50 mm off the receiver's right
+   * flank at the exact height the eye lands on.
+   *
+   * The four real answers are genuinely different mechanisms, and three of them are
+   * not a handle on the receiver at all:
+   *
+   *   ar / battle  T-bar at the rear of the upper — the existing part
+   *   ak / dmr     a small stub, part of the bolt carrier, on the RIGHT
+   *   smg          the "HK slap": a cranked paddle on a tube alongside the barrel
+   *   pump         there is none; the forend is the handle
+   *   pistol       there is none; the slide is the handle
+   */
   const charging = new Assembly(`${spec.id}-charging`);
-  const ch = chargingHandlePart();
-  charging.add(ch.geo ?? ch, M.alu, {});
-  (ch.geo ?? ch).dispose?.();
+  if (spec.pattern === 'ar' || spec.pattern === 'battle') {
+    const ch = chargingHandlePart();
+    charging.add(ch.geo ?? ch, M.alu, {});
+    (ch.geo ?? ch).dispose?.();
+  } else if (spec.pattern === 'ak' || spec.pattern === 'dmr') {
+    // Reciprocating stub: a 34 mm bar off the carrier with a chequered end face.
+    const arm = box(0.0132, 0.0092, 0.0182, 0.0011, 1);
+    charging.add(arm, M.steel, {});
+    arm.dispose();
+    const knob = box(0.0086, 0.0132, 0.0142, 0.0016, 2);
+    charging.add(knob, M.steel, { x: 0.0092 });
+    knob.dispose();
+    const grip = serrations(0.003, 0.0112, 0.0122, 4, 0.0004, 'y');
+    charging.add(grip, M.soot, { x: 0.0138 });
+    grip.dispose();
+  } else if (spec.pattern === 'smg') {
+    // The slap handle. It lives on the cocking tube, which signature.js builds as
+    // part of the body — this is the part that MOVES along it.
+    const arm = box(0.0072, 0.0132, 0.0182, 0.0011, 1);
+    charging.add(arm, M.steel, {});
+    arm.dispose();
+    const paddle = box(0.0212, 0.0112, 0.0132, 0.0018, 2);
+    charging.add(paddle, M.steel, { x: -0.0112, rz: -0.22 });
+    paddle.dispose();
+  }
 
   const bolt = new Assembly(`${spec.id}-bolt`);
   if (spec.slide) {

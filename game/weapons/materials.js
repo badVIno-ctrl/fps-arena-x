@@ -574,12 +574,26 @@ export const WEAPON_MATERIALS = {
       ...BASE,
       bake: { size: 512, seed: 71, relief: 0.004, tintA: 0x6b4526, tintB: 0x3a2314 },
       scale: 0.09,
-      // Darkened after the first render: 0.395 read as raw pine plank in the
-      // board's studio, brighter than the anodised receiver it is bolted to,
-      // which is backwards — shellacked birch is a DARK warm brown that catches
-      // a highlight, not a light one. Ratio held at ~3.1:1 red over blue, which
-      // is what carries the hue separation from the cool alloy.
-      tint: c(0.255, 0.176, 0.118),
+      /**
+       * MEASURED TWICE, on the board's own studio light, and both passes were too
+       * bright.
+       *
+       * 0.395 read as raw pine plank — brighter than the anodised receiver it is
+       * bolted to, which is backwards. 0.255 was still a pale orange-tan: the
+       * board's key is now 10.5 (it had to be, see shell/preview.js) and at that
+       * irradiance anything above ~0.18 albedo sits on the AgX shoulder, where the
+       * grain stops being visible at all and the wood reads as flat MDF.
+       *
+       * 0.165 lands the handguard around L=95-120 against a receiver at L=70-85:
+       * clearly the lighter of the two, clearly warm, and still inside the range
+       * where the baked grain survives. Shellacked birch is a DARK warm brown that
+       * catches a highlight — it is not a light material.
+       *
+       * The RATIO is held at ~3.1:1 red over blue through all three passes, since
+       * that is what carries the hue separation from the cool alloy, and hue is
+       * what the eye reads at 1080p.
+       */
+      tint: c(0.165, 0.112, 0.072),
       // Hand-oiled birch: satin, not gloss, and noticeably smoother than the
       // moulded nylon it has to be told apart from.
       roughness: [0.52, 0.2, 0.34],
@@ -607,7 +621,7 @@ export const WEAPON_MATERIALS = {
       ...BASE,
       bake: { size: 512, seed: 137, relief: 0.0045, tintA: 0x4e2c17, tintB: 0x26150c },
       scale: 0.075,
-      tint: c(0.196, 0.126, 0.082),
+      tint: c(0.126, 0.079, 0.05),
       roughness: [0.46, 0.22, 0.36],
       normalStrength: 1.2,
       detail: [20, 0.9, 0.42, 7],

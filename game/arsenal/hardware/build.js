@@ -23,7 +23,6 @@ import {
   addForeGrip,
   buildOptic,
   buildMiniReflex,
-  buildMagazine,
 } from '../../weapons/parts.js';
 import { MODEL_SPECS, specFor } from '../models/specs.js';
 import { ATTACHMENTS, SLOT_ORDER } from '../attachments.js';
@@ -392,40 +391,39 @@ export function buildMagazineUnit(spec, attId) {
   const mul = att.mul?.magLen ?? 1;
 
   /**
-   * Three bugs lived in this one call, and the first of them broke the game.
+   * A MAGAZINE UNIT BUILDS NO MAGAZINE. That is the fix, and it is not a cop-out.
    *
-   * `buildMagazine`'s signature is (asm, mats, o). This passed the options as
-   * `mats`, leaving `o` undefined, so the first line of the function threw
-   * `Cannot read properties of undefined (reading 'w')`. That threw inside
-   * arsenal init, which aborted engine.init() — no match, no gunsmith board.
+   * This function used to build a complete magazine body and hang it off the
+   * weapon — while the weapon MODEL also built one, as a moving part, because the
+   * magazine has to drop out during a reload. So every weapon in the game carried
+   * TWO magazines. Measured on the АКМ with tools/lab/census.mjs:
    *
-   * Second: the body material key is `poly`, not `matBody`, so every steel
-   * magazine in the game was quietly being built out of polymer.
+   *   akm-magazine-steel          y -172..8    z  -58..35
+   *   akm_magStandard-polymer     y -176..2    z -151..-38
    *
-   * Third: `buildMagazine` documents that it works in its own space with the
-   * origin at the feed lips, and it ignores y/z/tilt entirely. rig.js mounts
-   * `unit.object` at the group origin with no transform of its own, so an
-   * un-offset magazine renders inside the receiver instead of in the magwell.
-   * The placement has to be baked in here, which is what every sibling builder
-   * in this file does.
+   * Two bodies, 26 mm apart in z, in slightly different materials. On the board
+   * that reads as a magazine hanging off the front of the magwell at the wrong
+   * angle — the "detached, floating magazine" — and in game the animated one slid
+   * out of the static one during every reload.
+   *
+   * There can only be one, and it has to be the MOVING one: the mounted magazine
+   * is the magazine you drop. So the rig contributes no geometry here and instead
+   * publishes a length SCALE (`rig.magScale()`), which the viewmodel applies to
+   * the model's animated magazine. An extended magazine is then 34% longer, on the
+   * real part, and it still falls out of the gun.
+   *
+   * Same class of defect as the optic that was welded into the receiver, and the
+   * same resolution: a mountable thing must be exactly one thing.
    */
-  const magSpace = new Assembly(`${spec.id}_${attId}_mag`);
-  buildMagazine(magSpace, null, {
-    w: spec.mag.w,
-    d: spec.mag.d,
+  return {
+    id: attId,
+    slot: 'magazine',
+    assembly: asm,
+    placement: p,
     len: spec.mag.len * mul,
-    curve: spec.mag.curve,
-    segs: spec.mag.segs,
-    poly: spec.features.includes('steelMag') ? 'steel' : 'polymer',
-  });
-  asm.absorb(magSpace, { y: p.pos[1], z: p.pos[2], rx: spec.magTilt });
-  if (att.kind === 'mag' && attId === 'magQuick') {
-    // The tape loop that makes a quickdraw mag legible at a glance.
-    const loop = box(spec.mag.w + 0.004, 0.0032, 0.0182, 0.0008, 2);
-    asm.add(loop, 'rubber', { y: p.pos[1] - spec.mag.len * mul * 0.62, z: p.pos[2], rx: spec.magTilt });
-    loop.dispose();
-  }
-  return { id: attId, slot: 'magazine', assembly: asm, placement: p, len: spec.mag.len * mul };
+    /** What the animated magazine has to be scaled by along its own axis. */
+    magScale: mul,
+  };
 }
 
 /** One entry point: build whatever the slot needs. */
