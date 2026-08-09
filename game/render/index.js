@@ -307,6 +307,21 @@ export class RenderSystem {
 
     // ---- bookkeeping ------------------------------------------------------
     this.passes = [];
+    /**
+     * Passes that run AFTER the viewmodel is composited, and before metering.
+     *
+     * The distinction is not cosmetic. The viewmodel is deliberately composited
+     * after the registered passes (see step 14) so that depth of field and motion
+     * blur cannot smear the weapon — but that also means a pass in the normal list
+     * cannot SEE the weapon. Night vision has to: through goggles your own hands
+     * and rifle are intensified along with everything else, and the first live
+     * shot showed exactly what the alternative looks like — a green street with a
+     * full-colour AKM sitting in front of it.
+     *
+     * Still before metering, so auto-exposure meters what the player is actually
+     * shown rather than what the world looked like before the tube.
+     */
+    this.viewPasses = [];
     this.lights = [];
     this._draw = [];
     this._nDraw = 0;
@@ -493,13 +508,20 @@ export class RenderSystem {
    * write a full-screen result into `outputTarget`.
    * `pass.order` (default 0) controls ordering; `pass.enabled !== false`.
    */
-  registerPass(pass) {
-    this.passes.push(pass);
-    this.passes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  /**
+   * @param {object} pass
+   * @param {{afterViewmodel?: boolean}} [o]  run after the viewmodel is composited,
+   *   for effects that have to include the weapon in the player's hands. See the
+   *   note on `viewPasses`.
+   */
+  registerPass(pass, o = {}) {
+    const list = o.afterViewmodel || pass.afterViewmodel ? this.viewPasses : this.passes;
+    list.push(pass);
+    list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     if (pass.resize) pass.resize(this.screenSize.width, this.screenSize.height);
     return () => {
-      const i = this.passes.indexOf(pass);
-      if (i >= 0) this.passes.splice(i, 1);
+      const i = list.indexOf(pass);
+      if (i >= 0) list.splice(i, 1);
     };
   }
 
@@ -929,6 +951,7 @@ export class RenderSystem {
     this.normalTexture = this.gbuffer.normalTexture;
 
     for (const p of this.passes) p.resize?.(rw, rh);
+    for (const p of this.viewPasses) p.resize?.(rw, rh);
     this.taa?.reset();
     this.exposure.reset();
   }
@@ -1483,6 +1506,19 @@ export class RenderSystem {
       vu.tColor.value = color;
       vu.tView.value = this.viewRt.texture;
       this.viewComposite.render(renderer, out);
+      color = out.texture;
+      this._pingIndex ^= 1;
+    }
+
+    // ---- 14b. passes that must include the viewmodel ---------------------
+    // Night vision lives here: through goggles the weapon in your hands is
+    // intensified too. Still before metering, so exposure adapts to what the
+    // player is shown.
+    for (let i = 0; i < this.viewPasses.length; i++) {
+      const p = this.viewPasses[i];
+      if (p.enabled === false) continue;
+      const out = this.pingRt[this._pingIndex];
+      p.render(renderer, color, out, this);
       color = out.texture;
       this._pingIndex ^= 1;
     }

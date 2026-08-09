@@ -101,6 +101,16 @@ export class AiSystem {
     };
     this._shellEvent = { position: new THREE.Vector3(), velocity: new THREE.Vector3() };
     this._tracerEvent = { from: this._tracerFrom, to: this._tracerTo, speed: 800 };
+    /**
+     * WEATHER HOOKS, injected by weather/index.js and 1 when it is absent.
+     *
+     * Declared here rather than left implicit so that grepping the AI for what
+     * can change its perception finds them. Both are read where the agent already
+     * computes a range, so there is no second code path for "bad weather".
+     */
+    this.viewRangeScale = 1;
+    this.hearingScale = 1;
+
     this._grenades = [];
     this._grenadeGeo = null;
     this._grenadeMat = null;
@@ -301,7 +311,14 @@ export class AiSystem {
       // cosmetic - bots heard a silenced shot from exactly as far as a bare one,
       // gutting the one attachment whose entire purpose is not being heard.
       // Anyone near the line of fire also feels suppressed by it.
-      const range = 90 * (e.loudness ?? 1);
+      /**
+       * And weather deafens them. `hearingScale` is injected by weather and is 1
+       * when weather is absent. A downpour at 0.55 sound mask takes a rifle shot's
+       * 90 m audible range down to ~55 m — so rain is genuinely concealment for
+       * movement and a penalty for reacting to a noise, which is the whole reason
+       * the preset table carries a `soundMask` at all.
+       */
+      const range = 90 * (e.loudness ?? 1) * (this.hearingScale ?? 1);
       for (const a of this.agents) {
         if (!a.alive) continue;
         a.hear(e.origin, range);
@@ -350,7 +367,7 @@ export class AiSystem {
     on('player:footstep', (e) => {
       if (!e || !e.position) return;
       const loud = e.running ? 24 : 11;
-      for (const a of this.agents) if (a.alive) a.hear(e.position, loud);
+      for (const a of this.agents) if (a.alive) a.hear(e.position, loud * (this.hearingScale ?? 1));
     });
   }
 

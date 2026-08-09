@@ -253,7 +253,22 @@ export class MaterialSystem {
     if (changes.groundY !== undefined) u.owGroundY.value = changes.groundY;
     if (changes.normalStrength !== undefined) u.owNormalAmp.value = changes.normalStrength;
     if (changes.weather !== undefined) u.owWeatherP.value.fromArray(changes.weather);
+    // Surface water. Separate from `weather` on purpose: weathering is permanent
+    // and belongs to the level, wetness is transient and belongs to the sky.
+    if (changes.wet !== undefined && u.owWetP) u.owWetP.value.fromArray(changes.wet);
     return material;
+  }
+
+  /**
+   * Every material this bank has handed out.
+   *
+   * Exposed so `weather` can retune the shared `weather` uniform on all of them
+   * when it starts raining. It hands back the live instances deliberately: the
+   * alternative is a `setWeatherAll()` here, which would put a gameplay concept
+   * into the material bank and make the bank depend on what weather means.
+   */
+  materials() {
+    return this._materials.values();
   }
 
   /** Where the ground-splash weathering band sits, in world Y. */

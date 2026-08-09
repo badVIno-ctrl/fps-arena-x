@@ -33,6 +33,12 @@ export const ACTIONS = {
   // silently drop the declared binding, accept both.
   flashlight: ['KeyT', 'KeyN'],
   laser: ['KeyJ'],
+  /**
+   * Night vision. `KeyO` rather than the conventional `KeyN`, because `KeyN` is
+   * already live for the weapon light and is the one players have muscle memory
+   * for — see the note above. Taught in the HUD prompt once the sun is down.
+   */
+  nvg: ['KeyO'],
   pause: ['Escape'],
 };
 

@@ -326,7 +326,17 @@ export class Agent {
     const to = this._dir.copy(player).sub(eye);
     const dist = to.length();
     let visible = false;
-    if (dist < this.viewRange) {
+    /**
+     * WEATHER SHORTENS THE SIGHT LINE.
+     *
+     * `viewRangeScale` is injected by the weather subsystem (weather/index.js);
+     * without it the value is 1 and nothing changes, which is what keeps the AI
+     * independent of whether weather is registered at all. Fog at 55 m visibility
+     * takes an agent's 58 m view range down to about 12 m, which is the difference
+     * between "a filter is on" and "I can walk past them".
+     */
+    const range = this.viewRange * (this.ai.viewRangeScale ?? 1);
+    if (dist < range) {
       to.multiplyScalar(1 / dist);
       const fwd = this._v2.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       const dot = fwd.x * to.x + fwd.z * to.z;

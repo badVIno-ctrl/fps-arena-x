@@ -41,6 +41,8 @@ import { NetSystem, defaultSocketUrl } from './net/index.js';
 import { Heartbeat } from './net/heartbeat.js';
 import { ArsenalSystem } from './arsenal/index.js';
 import { GearSystem } from './gear/index.js';
+import { WeatherSystem } from './weather/index.js';
+import { VisionSystem } from './vision/index.js';
 import { ShellSystem } from './shell/index.js';
 import { ModeMenu, MatchResults } from './shell/menu.js';
 
@@ -67,6 +69,8 @@ const STEP_LABELS = {
   net: 'СЕТЬ',
   arsenal: 'АРСЕНАЛ',
   gear: 'СНАРЯЖЕНИЕ',
+  weather: 'ПОГОДА',
+  vision: 'ОПТИКА',
   shell: 'ВЕРСТАК',
   audio: 'ЗВУК',
 };
@@ -163,6 +167,8 @@ export async function boot({ canvas } = {}) {
     .add(NetSystem)
     .add(ArsenalSystem)
     .add(GearSystem)
+    .add(WeatherSystem)
+    .add(VisionSystem)
     .add(ShellSystem)
     .add(AudioSystem);
 

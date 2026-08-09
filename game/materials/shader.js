@@ -88,6 +88,21 @@ uniform vec4  owPatchP;      // x coverage, y cell metres, z albedo delta, w rou
 uniform vec4  owClothP;      // x transmission, y underside darkening, z fold amt, w unused
 uniform vec4  owParallaxP;   // x depth (m), y fade start, z fade end, w max layers
 uniform vec4  owWeatherP;    // x dust, y streak, z splash height, w cavity grime
+/**
+ * SURFACE WATER.  x = wetness 0..1, y = puddle coverage, z = ripple amount, w unused
+ *
+ * Separate from owWeatherP because it is a different physical thing. The four
+ * weathering channels are all PERMANENT marks — dust, dried runoff stains, a
+ * splash band, grime in the crevices — and they belong to the level. Wetness is a
+ * transient film of water that the weather subsystem raises and lowers, and it
+ * behaves nothing like a stain: it DARKENS albedo (water fills the pores and
+ * light that enters no longer scatters back out), it SMOOTHS the surface, and it
+ * pools on horizontal faces rather than running down vertical ones.
+ *
+ * Putting it in the same vector would have meant a rain shower permanently
+ * repainting the street.
+ */
+uniform vec4  owWetP;
 uniform vec4  owWearP;       // x wear amt, y grime amt, z vcol AO amt, w curvature
 uniform vec3  owTintCol;
 uniform vec3  owDustCol;
@@ -565,6 +580,56 @@ const MAIN_FRAGMENT = /* glsl */ `
     nShade = normalize( mix( nShade, normalize( owP2V * owNp ), wedge * 0.45 ) );
   #endif
 
+  // ------------------------------------------------------ surface water ----
+  /**
+   * WET, and wet is not a blue filter.
+   *
+   * Four separate physical effects, and skipping any of them is what makes rain
+   * in games read as a colour grade:
+   *
+   *   1. ALBEDO FALLS. Water fills the pores, so light that enters the surface is
+   *      internally reflected instead of scattering back out. A wet paving slab is
+   *      genuinely 25-45% darker than a dry one — this is the single largest and
+   *      most convincing cue, and it is the one a filter cannot fake.
+   *   2. ROUGHNESS FALLS, hard. The water surface is optically smooth, so the
+   *      broad diffuse sheen of dry concrete collapses into a sharp reflection.
+   *      That is what puts the streetlights on the road.
+   *   3. IT POOLS. Water runs off vertical faces and collects on horizontal ones,
+   *      so wetness is weighted by the up-facing normal — and puddles form in the
+   *      LOW points of the height field, which is where water actually goes.
+   *   4. POROUS THINGS DRINK IT. A rough, porous surface darkens more than a
+   *      polished one, so the effect is scaled by the material's own roughness.
+   *
+   * Skipped entirely when dry: owWetP.x at zero costs one compare.
+   */
+  if ( owWetP.x > 0.002 ) {
+    float wet = clamp( owWetP.x, 0.0, 1.0 );
+    float upFace = clamp( owNw.y, 0.0, 1.0 );
+    // Runs off walls, collects on floors. 0.35 rather than 0 on a vertical face
+    // because a wall in the rain is still wet, just not pooled.
+    float film = wet * mix( 0.35, 1.0, upFace * upFace );
+
+    // Puddles gather in the height field's valleys, and only where it is flat.
+    float low = 1.0 - owHeightS;
+    float puddle = wet * owWetP.y * smoothstep( 0.55, 0.95, low ) * smoothstep( 0.55, 0.9, upFace );
+
+    // 1. albedo: porous surfaces drink more, so scale by the dry roughness.
+    float porosity = 0.35 + 0.65 * orm.g;
+    alb.rgb *= 1.0 - film * 0.42 * porosity;
+    alb.rgb *= 1.0 - puddle * 0.30;
+
+    // 2. roughness: toward optically smooth, and all the way there in a puddle.
+    orm.g = mix( orm.g, 0.06, film * 0.78 );
+    orm.g = mix( orm.g, 0.03, puddle );
+
+    // 3. the water surface is flat: relief is submerged, most of all in a puddle.
+    nShade = normalize( mix( nShade, normalize( owP2V * owNw ), min( 1.0, film * 0.45 + puddle * 0.85 ) ) );
+
+    // 4. a dielectric water film raises the specular floor — this is why wet
+    //    tarmac has a sheen at grazing angles that dry tarmac does not.
+    orm.b = clamp( orm.b + film * 0.06, 0.0, 1.0 );
+  }
+
   // ------------------------------------------- cavity + vertex masks ----
   float cav = 1.0 - owHeightS;
   alb.rgb = mix( alb.rgb, owGrimeCol, cav * cav * owWeatherP.w );
@@ -751,6 +816,12 @@ export const DEFAULT_PARAMS = {
   detile: 0,
   /** weathering: dust, rain streaks, ground-splash height, cavity grime */
   weather: [0.35, 0.3, 0.55, 0.4],
+  /**
+   * Surface water: [ wetness, puddleCoverage, ripple, unused ]. Dry by default —
+   * the weather subsystem is the only thing that raises it, and a level that
+   * shipped wet would have nowhere to go.
+   */
+  wet: [0, 0.6, 0, 0],
   groundY: 0,
   /** vertex-colour masks: wear, grime, extra AO, unused */
   wear: [0.5, 0.7, 0.5, 0],
@@ -823,6 +894,7 @@ export function extendMaterial(material, p, shared) {
       value: new THREE.Vector4(p.parallax, p.parallaxFade[0], p.parallaxFade[1], p.parallaxLayers),
     },
     owWeatherP: { value: new THREE.Vector4(...p.weather) },
+    owWetP: { value: new THREE.Vector4(...(p.wet ?? DEFAULT_PARAMS.wet)) },
     owWearP: { value: new THREE.Vector4(...p.wear) },
     owTintCol: { value: col(p.tint) },
     owDustCol: { value: col(p.dustColor) },
