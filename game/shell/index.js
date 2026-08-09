@@ -99,8 +99,19 @@ export class ShellSystem {
     this.screen = new GunsmithScreen(host, {
       preview: this.preview,
       onApply: (weaponId, loadout) => this.#equip(weaponId, loadout),
+      /**
+       * The kit goes over the same event bus as the build, for the same reason:
+       * the shell must not reach into the arsenal, and the net layer will want to
+       * hear a kit change too. `arsenal` validates again on receipt — the board is
+       * not the only possible source of a kit.
+       */
+      onKit: (kit) => this.#setKit(kit),
       onClose: () => this.#resumeMatch(),
     });
+    // Start the board from what the player is actually carrying, so opening it
+    // never shows a kit they did not choose.
+    const kit = ctx.peek('arsenal')?.kit;
+    if (kit) this.screen.kit = { ...kit, weapons: [...kit.weapons] };
 
     this.bench = new WeaponBench({
       scene: ctx.scene,
@@ -276,6 +287,18 @@ export class ShellSystem {
    * Commit a build. The weapon subsystem is told through the event bus rather
    * than reached into, so the shell keeps working when the arsenal is rebuilt.
    */
+  /** Commit a carried kit. Emitted, never reached in — see the note above. */
+  #setKit(kit) {
+    if (!kit?.weapons?.length) return;
+    this._kit = { ...kit, weapons: [...kit.weapons] };
+    this.ctx.events?.emit?.('shell:kit', { kit: this._kit });
+  }
+
+  /** What the player is taking into the match, for the net layer. */
+  kit() {
+    return this._kit ? { ...this._kit, weapons: [...this._kit.weapons] } : null;
+  }
+
   #equip(weaponId, loadout) {
     this._loadouts.set(weaponId, { ...loadout });
     this.ctx.events?.emit?.('shell:loadout', { weaponId, loadout: { ...loadout } });

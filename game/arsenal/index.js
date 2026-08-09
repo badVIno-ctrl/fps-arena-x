@@ -1,4 +1,5 @@
 import { ARSENAL_DEFS, ARSENAL_ORDER } from './defs.js';
+import { defaultKit, validateKit, carryPositionFor, weaponCost } from './rules.js';
 import { buildArsenalModel } from './models/build.js';
 import { HardwareRig } from './hardware/rig.js';
 import { defaultLoadout } from './attachments.js';
@@ -32,11 +33,14 @@ import { Rng } from '../core/rng.js';
 /** Built by the base weapon system; superseded by the arsenal. */
 const BASE_IDS = ['rifle', 'smg', 'pistol'];
 
-/** Digit 1 / 2 / 3, by arsenal slot. */
-const DIGIT_SLOTS = ['rifle', 'special', 'pistol'];
-
-/** What the player spawns with before touching the board. */
-const START = { rifle: 'akm', special: 'mp5', pistol: 'glock18' };
+/**
+ * Carry positions, in the order the digit keys and the weapon wheel visit them.
+ *
+ * `rules.js` decides where a weapon RIDES (sling / pack / holster) from its
+ * class, and that is the same three-way split the digit keys always implied — it
+ * is just now a physical fact about the kit rather than a label on a def.
+ */
+const CARRY_ORDER = ['sling', 'pack', 'holster'];
 
 /**
  * Raw key this system owns directly. The light and laser used to live here too,
@@ -52,8 +56,17 @@ export class ArsenalSystem {
   constructor() {
     /** weaponId -> HardwareRig */
     this.rigs = new Map();
-    /** what digits 1..3 draw, in DIGIT_SLOTS order */
-    this.slotIds = [START.rifle, START.special, START.pistol];
+    /**
+     * THE KIT the player is actually carrying — not the roster.
+     *
+     * The distinction did not exist before, and its absence was the bug:
+     * `WeaponSystem.weaponIds` returned every registered state, so Tab and the
+     * wheel cycled all nine weapons and the player walked into every match with
+     * ~28 kg of iron slung about their person. See arsenal/rules.js.
+     */
+    this.kit = defaultKit();
+    /** what digits 1..3 draw, in CARRY_ORDER order */
+    this.slotIds = [null, null, null];
     this._off = [];
     this.stats = { weapons: 0, tris: 0 };
   }
@@ -93,12 +106,14 @@ export class ArsenalSystem {
       this.rigs.set(id, rig);
     }
 
-    // Draw an arsenal weapon BEFORE the base ones leave the roster, so the switch
-    // never passes through an id that no longer resolves.
-    wp.setWeaponImmediate(this.slotIds[0]);
+    /**
+     * Publish the kit BEFORE the base guns leave the roster, so the switch never
+     * passes through an id that no longer resolves.
+     */
+    this.#syncKit();
+    wp.setWeaponImmediate(this.slotIds.find(Boolean));
     for (const id of BASE_IDS) wp.states.delete(id);
 
-    wp.slotIds = this.slotIds;
     wp.applyLoadout = (weaponId, loadout) => this.applyLoadout(weaponId, loadout);
     // The engine needs the mounted build's resolved numbers at fire time (how loud
     // the shot is, whether it is suppressed) but must not import arsenal - the
@@ -120,8 +135,20 @@ export class ArsenalSystem {
      */
     wp.viewmodel.opticProvider = () => this.activeRig()?.opticGlass() ?? null;
 
+    /**
+     * WHAT THE PLAYER CARRIES.
+     *
+     * `WeaponSystem.weaponIds` used to be `[...states.keys()]` — everything ever
+     * registered — which is why Tab cycled the entire arsenal. It now asks here,
+     * and here answers with the kit. Reserve ammunition follows the same rule:
+     * spare magazines are a property of the KIT, not of the weapon, so a rifle
+     * you did not bring has no rounds for it either.
+     */
+    wp.carriedIds = () => this.slotIds.filter(Boolean);
+
     this._off.push(
-      ctx.events.on('shell:loadout', (e) => this.applyLoadout(e?.weaponId, e?.loadout))
+      ctx.events.on('shell:loadout', (e) => this.applyLoadout(e?.weaponId, e?.loadout)),
+      ctx.events.on('shell:kit', (e) => this.setKit(e?.kit)),
     );
 
     this.stats = { weapons: this.rigs.size, tris };
@@ -144,13 +171,67 @@ export class ArsenalSystem {
     // memo has to be told the geometry moved — otherwise a swapped barrel would
     // look different and shoot identically.
     this.weapons?.resetBallisticsCache?.();
-    const slot = ARSENAL_DEFS[weaponId]?.slot;
-    const i = DIGIT_SLOTS.indexOf(slot);
-    if (i >= 0) {
-      this.slotIds[i] = weaponId;
-      this.weapons.slotIds = this.slotIds;
-    }
     return true;
+  }
+
+  /**
+   * Replace the carried kit.
+   *
+   * Validated here as well as on the board, because the board is not the only
+   * possible caller (the net layer will send a kit, and a saved profile will load
+   * one) and an invalid kit that gets as far as `wp.states` is a player carrying
+   * something the rules say they cannot.
+   */
+  setKit(kit) {
+    if (!kit?.weapons?.length) return { ok: false, reason: 'Пустой набор.' };
+    const v = validateKit(kit);
+    if (!v.ok) return v;
+    this.kit = { ...kit, weapons: [...kit.weapons] };
+    this.#syncKit();
+    // Holding a weapon you just put back on the rack is not a state the player
+    // can be left in.
+    if (!this.slotIds.includes(this.weapons.activeId)) {
+      this.weapons.setWeaponImmediate(this.slotIds.find(Boolean));
+    }
+    this.ctx?.events?.emit?.('arsenal:kit', { kit: this.kit, accounting: v });
+    return v;
+  }
+
+  /**
+   * Project the kit onto the three digit keys and refill the reserve.
+   *
+   * The reserve is deliberately recomputed from the kit rather than left at the
+   * def's `reserve`: `weaponCost` already decided how many spare magazines this
+   * kit is paying mass and volume for, and the ammunition the player has in the
+   * field must be the ammunition they chose to carry. Otherwise the pack budget
+   * is a cosmetic number — you would pay for six magazines and get seven.
+   */
+  #syncKit() {
+    const wp = this.weapons;
+    this.slotIds = [null, null, null];
+    for (const id of this.kit.weapons) {
+      const i = CARRY_ORDER.indexOf(carryPositionFor(ARSENAL_DEFS[id]));
+      if (i >= 0) this.slotIds[i] = id;
+    }
+    wp.slotIds = this.slotIds;
+
+    for (const [id, st] of wp.states) {
+      const carried = this.slotIds.includes(id);
+      if (!carried) {
+        st.reserve = 0;
+        continue;
+      }
+      const cost = weaponCost(id, {
+        loadout: this.rigs.get(id)?.loadout() ?? null,
+        mags: this.kit.mags?.[id] ?? null,
+      });
+      st.reserve = cost.mags * st.def.magSize;
+    }
+  }
+
+  /** The accounting for the current kit, for the HUD and the board. */
+  kitAccounting() {
+    return validateKit(this.kit);
   }
 
   /** The rig on the weapon currently in the player's hands, or null. */
@@ -190,6 +271,7 @@ export class ArsenalSystem {
     if (this.weapons) {
       delete this.weapons.applyLoadout;
       delete this.weapons.slotIds;
+      delete this.weapons.carriedIds;
       delete this.weapons.resolvedStats;
       delete this.weapons.sightPoint;
       if (this.weapons.viewmodel) this.weapons.viewmodel.opticProvider = null;

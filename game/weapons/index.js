@@ -217,7 +217,22 @@ export class WeaponSystem {
     return this.state?.def ?? null;
   }
 
+  /**
+   * The weapons the player is CARRYING — not everything registered.
+   *
+   * This used to return `[...this.states.keys()]`, and the arsenal registers a
+   * state for all nine weapons at init, so Tab and the mouse wheel cycled the
+   * entire armoury: the player walked into every match with an АКМ, an АК-74, an
+   * M416, a SCAR-H, an СВД, an MP5, an M870 and two pistols at once.
+   *
+   * `carriedIds` is injected by the arsenal (which owns the carry rules in
+   * arsenal/rules.js). Without arsenal registered — the standalone harness, the
+   * three base guns — every registered weapon IS the kit, so the fallback is the
+   * old behaviour and nothing else has to know about kits.
+   */
   get weaponIds() {
+    const carried = this.carriedIds?.();
+    if (carried?.length) return carried;
     return [...this.states.keys()];
   }
 

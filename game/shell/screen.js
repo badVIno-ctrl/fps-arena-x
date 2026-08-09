@@ -9,6 +9,15 @@ import {
   statDelta,
 } from '../arsenal/attachments.js';
 import { ARSENAL_DEFS, ARSENAL_ORDER, SLOTS, weaponsInSlot } from '../arsenal/defs.js';
+import {
+  PACK,
+  availability,
+  carryPositionFor,
+  defaultKit,
+  validateKit,
+  withWeapon,
+  withoutWeapon,
+} from '../arsenal/rules.js';
 import { el, setText, setStyle, setClass, clamp, clamp01, damp, ease } from '../ui/util.js';
 import { installGunsmithStyles, removeGunsmithStyles } from './style.js';
 
@@ -71,6 +80,10 @@ export class GunsmithScreen {
     this.slot = 'optic';
     /** weaponId -> loadout, so each gun remembers its own build. */
     this.loadouts = new Map();
+    /** What the player is taking into the match. See arsenal/rules.js. */
+    this.kit = defaultKit();
+    /** Set by the owner so a carry change can reach the arsenal. */
+    this.onKit = o.onKit ?? null;
     this._rectAge = 1;
     this._rect = null;
 
@@ -99,11 +112,38 @@ export class GunsmithScreen {
   #buildBody() {
     const body = el('div', 'body', this.root);
 
-    // ---- column 1: the rack ------------------------------------------------
+    /**
+     * ---- column 1: the rack, and WHAT YOU ARE TAKING ----------------------
+     *
+     * The rack used to be a list of nine weapons where clicking one selected it
+     * for inspection — and that was the whole interaction, because the player
+     * carried all nine regardless. Now the rack has two jobs, and they have to
+     * stay visibly separate or the board becomes a guessing game:
+     *
+     *   the NAME    selects the weapon to look at and work on
+     *   the CHECK   adds it to the kit, or takes it out
+     *
+     * Above the list is the pack meter. It is not decoration: the whole point of
+     * a carry limit is that the player can see it filling before they hit it, and
+     * a limit discovered only by refusal is indistinguishable from a bug.
+     */
     const rack = el('div', 'col', body);
+    el('div', 'col-title', rack, 'СНАРЯЖЕНИЕ');
+    this.packBox = el('div', 'pack', rack);
+    const massRow = el('div', 'pack-row', this.packBox);
+    el('div', 'pack-lbl', massRow, 'МАССА');
+    this.packMassVal = el('div', 'pack-val', massRow, '');
+    this.packMassBar = el('i', null, el('div', 'pack-bar', this.packBox));
+    const volRow = el('div', 'pack-row', this.packBox);
+    el('div', 'pack-lbl', volRow, 'ОБЪЁМ');
+    this.packVolVal = el('div', 'pack-val', volRow, '');
+    this.packVolBar = el('i', null, el('div', 'pack-bar', this.packBox));
+    this.packWhy = el('div', 'pack-why', this.packBox, '');
+
     el('div', 'col-title', rack, 'СТВОЛЫ');
     const rackScroll = el('div', 'scroll', rack);
     this.rackButtons = new Map();
+    this.rackChecks = new Map();
     for (const slot of SLOTS) {
       const list = weaponsInSlot(slot);
       if (!list.length) continue;
@@ -112,7 +152,21 @@ export class GunsmithScreen {
       for (const id of list) {
         const def = ARSENAL_DEFS[id];
         if (!def) continue;
-        const b = el('button', 'rack-item', rackScroll);
+        const row = el('div', 'rack-row', rackScroll);
+        // The take/leave control. A checkbox rather than a second click on the
+        // name, because "look at" and "carry" are different intentions and one
+        // control for two intentions is how a player ends up carrying a shotgun
+        // they only wanted to read the stats of.
+        const take = el('button', 'rack-take', row);
+        take.type = 'button';
+        take.title = 'Взять с собой';
+        take.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.toggleCarry(id);
+        });
+        this.rackChecks.set(id, take);
+
+        const b = el('button', 'rack-item', row);
         b.type = 'button';
         el('span', null, b, def.label ?? id);
         el('span', 'kl', b, def.rpm ? `${def.rpm}` : '');
@@ -244,6 +298,34 @@ export class GunsmithScreen {
     this.refresh();
   }
 
+  /**
+   * Take a weapon, or leave it behind.
+   *
+   * `withWeapon` returns a NEW kit and reports what it had to displace, so a
+   * second rifle is a SWAP rather than a refusal — that is what a player means
+   * when they click one. A refusal that cannot be acted on is a dead end, and the
+   * reason is shown next to the meter instead of being swallowed.
+   */
+  toggleCarry(id) {
+    const carried = this.kit.weapons.includes(id);
+    const r = carried ? withoutWeapon(this.kit, id) : withWeapon(this.kit, id);
+    if (!r.ok) {
+      this._kitWhy = r.reason;
+      this.refresh();
+      return false;
+    }
+    this._kitWhy = r.displaces
+      ? `${ARSENAL_DEFS[r.displaces].label} \u2192 на стойку: ремень один.`
+      : '';
+    this.kit = r.kit;
+    // Look at what you just picked up: taking a weapon is a statement of intent
+    // about which gun you are working on.
+    if (!carried) this.selectWeapon(id);
+    else this.refresh();
+    this.onKit?.({ ...this.kit, weapons: [...this.kit.weapons] });
+    return true;
+  }
+
   reset() {
     const l = defaultLoadout(this.def());
     this.loadouts.set(this.weaponId, l);
@@ -252,8 +334,28 @@ export class GunsmithScreen {
   }
 
   apply() {
+    /**
+     * Committing sends BOTH: the build on the weapon in view, and the kit.
+     *
+     * Sending only the loadout was correct while the player carried everything.
+     * Now the kit is the more important of the two — it decides what goes into
+     * the match at all — and it has to be validated once more here, because the
+     * board's own state can be edited into an illegal shape (mount a suppressor
+     * on everything and the mass goes up after the kit was chosen).
+     */
+    const loadouts = {};
+    for (const [id, l] of this.loadouts) loadouts[id] = l;
+    const kit = { ...this.kit, loadouts };
+    const v = validateKit(kit);
+    if (!v.ok) {
+      this._kitWhy = v.reason;
+      this.refresh();
+      return false;
+    }
+    this.onKit?.(kit);
     this.onApply?.(this.weaponId, { ...this.loadout() });
     this.close();
+    return true;
   }
 
   /* ------------------------------------------------------------------ paint */
@@ -265,6 +367,7 @@ export class GunsmithScreen {
     const stats = resolveStats(def, loadout);
 
     for (const [id, b] of this.rackButtons) setClass(b, 'on', id === this.weaponId);
+    this.#paintCarry();
 
     setText(this.stageName, def.label ?? def.id);
     setText(
@@ -285,6 +388,56 @@ export class GunsmithScreen {
 
     this.#paintAttachments(def, loadout);
     this.#paintStats(def, loadout);
+  }
+
+  /**
+   * The pack meter and the take/leave state of every weapon in the rack.
+   *
+   * `availability` answers, per weapon, whether it can be added and what it would
+   * displace — so an unavailable weapon is shown with its REASON on the tooltip
+   * rather than hidden. A player who cannot find where the second rifle went
+   * assumes the game is broken; one who reads "ремень один" has learnt a rule.
+   */
+  #paintCarry() {
+    // The attachments the player has actually chosen change the mass, so the
+    // accounting is done against the live loadouts, not against factory builds.
+    const loadouts = {};
+    for (const [id, l] of this.loadouts) loadouts[id] = l;
+    const kit = { ...this.kit, loadouts };
+    const v = validateKit(kit);
+
+    const massFrac = clamp01(v.kg / v.limitKg);
+    const volFrac = clamp01(v.litres / v.limitLitres);
+    setText(this.packMassVal, `${v.kg.toFixed(1)} / ${v.limitKg} кг`);
+    setText(this.packVolVal, `${v.litres.toFixed(1)} / ${v.limitLitres} л`);
+    setStyle(this.packMassBar, 'width', `${(massFrac * 100).toFixed(1)}%`);
+    setStyle(this.packVolBar, 'width', `${(volFrac * 100).toFixed(1)}%`);
+    setClass(this.packMassBar, 'over', massFrac > 0.999);
+    setClass(this.packVolBar, 'over', volFrac > 0.999);
+    setClass(this.packMassBar, 'tight', massFrac > 0.85 && massFrac <= 0.999);
+    setClass(this.packVolBar, 'tight', volFrac > 0.85 && volFrac <= 0.999);
+
+    const why = this._kitWhy || v.reason || '';
+    setText(this.packWhy, why);
+    setStyle(this.packWhy, 'display', why ? '' : 'none');
+    setClass(this.packWhy, 'bad', !v.ok);
+
+    for (const a of availability(kit)) {
+      const take = this.rackChecks.get(a.id);
+      if (!take) continue;
+      setClass(take, 'on', a.carried);
+      setClass(take, 'blocked', !a.carried && !a.ok);
+      take.title = a.carried
+        ? 'Оставить на стойке'
+        : a.ok
+          ? a.displaces
+            ? `Взять вместо ${ARSENAL_DEFS[a.displaces].label}`
+            : 'Взять с собой'
+          : (a.reason ?? 'Не влезает');
+    }
+    // The carried weapons are also marked on the name, so the kit is legible
+    // without hovering anything.
+    for (const [id, b] of this.rackButtons) setClass(b, 'carried', this.kit.weapons.includes(id));
   }
 
   #paintAttachments(def, loadout) {

@@ -124,7 +124,65 @@ const CSS = `
 }
 .fa-gs .scroll { overflow-y:auto; min-height:0; scrollbar-width:thin; }
 
+/* the pack meter ---------------------------------------------------------
+ *
+ * The carry limit only works as a design if it is visible BEFORE it is hit. A
+ * limit discovered by refusal is indistinguishable from a bug, so both budgets
+ * are drawn as bars that fill, they go amber at 85% and red when exceeded, and
+ * the reason for a refusal is printed under them rather than swallowed. */
+.fa-gs .pack {
+  display:flex; flex-direction:column; gap:calc(var(--u) * 0.8);
+  padding:calc(var(--u) * 2) 0 calc(var(--u) * 2.5);
+  border-bottom:1px solid var(--line);
+}
+.fa-gs .pack-row { display:flex; align-items:baseline; justify-content:space-between; gap:var(--u); }
+.fa-gs .pack-lbl { font-size:calc(9.5px * var(--k)); letter-spacing:.24em; color:var(--faint); }
+.fa-gs .pack-val {
+  font: 600 calc(11.5px * var(--k))/1 var(--fm), ui-monospace, monospace;
+  color:var(--muted); font-variant-numeric:tabular-nums;
+}
+.fa-gs .pack-bar {
+  position:relative; height:calc(4px * var(--k));
+  background:var(--panel-2);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.45);
+  overflow:hidden;
+}
+.fa-gs .pack-bar i {
+  position:absolute; inset:0 auto 0 0; width:0;
+  background:var(--good);
+  transition: width var(--dur-hover, 180ms) var(--ease-out, ease-out);
+}
+.fa-gs .pack-bar i.tight { background:var(--pick); }
+.fa-gs .pack-bar i.over  { background:var(--warn); }
+.fa-gs .pack-why {
+  font-size:calc(10.5px * var(--k)); line-height:1.4; color:var(--muted);
+  padding-top:calc(var(--u) * 0.8);
+}
+.fa-gs .pack-why.bad { color:#ff8b7c; }
+
 /* weapon rack ------------------------------------------------------------ */
+/* Two controls per row, on purpose: the CHECK takes the weapon, the NAME opens
+   it on the bench. One control for both intentions is how a player ends up
+   carrying a shotgun they only wanted to read the stats of. */
+.fa-gs .rack-row { display:flex; align-items:stretch; gap:calc(var(--u) * 0.8); }
+.fa-gs .rack-row .rack-item { flex:1; }
+.fa-gs .rack-take {
+  flex:0 0 auto; width:calc(20px * var(--k));
+  border:1px solid var(--line-strong);
+  background:var(--panel-2);
+  cursor:pointer; position:relative;
+  font-family:inherit;
+}
+.fa-gs .rack-take:hover { border-color:var(--muted); }
+.fa-gs .rack-take::after {
+  content:""; position:absolute; inset:calc(5px * var(--k));
+  background:transparent;
+}
+.fa-gs .rack-take.on { border-color:var(--good); }
+.fa-gs .rack-take.on::after { background:var(--good); }
+.fa-gs .rack-take.blocked { cursor:not-allowed; opacity:.45; border-style:dashed; }
+.fa-gs .rack-item.carried { color:var(--ink); }
+
 .fa-gs .rack-item {
   display:flex; align-items:baseline; justify-content:space-between;
   gap:var(--u);
