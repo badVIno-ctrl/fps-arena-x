@@ -363,7 +363,15 @@ function buildHandguardGroup(body, spec) {
  */
 function magazineMat(spec) {
   if (spec.id === 'ak74') return M.polyTan;
-  if (spec.id === 'akm' || spec.id === 'svd' || spec.id === 'mp5') return M.steel;
+  /**
+   * BLUED, not brushed. `steel` is `metal_brushed` at 0.115 albedo, and rendered
+   * beside warm wood a full-length magazine of it was the brightest object on the
+   * weapon — the АКМ looked like it was fed from a chrome box. A stamped AK
+   * magazine is phosphated or blued sheet: darker than the receiver, with the
+   * highlight only on the ribs. `steel_soot` is the bank's dark ferrous finish and
+   * is what the barrel and the dust cover already use.
+   */
+  if (spec.id === 'akm' || spec.id === 'svd' || spec.id === 'mp5') return M.soot;
   return M.poly;
 }
 
@@ -428,46 +436,69 @@ function buildGripAndStock(body, spec) {
 
   if (spec.features.includes('fixedStock')) {
     /**
-     * AK: a one-piece wooden stock, and the shape is the whole point.
+     * AK: ONE PIECE OF TIMBER, and both words matter.
      *
-     * The old version was `box(0.03, 0.058, len)` plus an 88 MM TALL butt pad,
-     * which in profile is a rectangle with a taller rectangle stuck on the end —
-     * measured on screen as a featureless slab occupying a quarter of the
-     * weapon. A real AK stock TAPERS: it leaves the receiver deep, thins toward
-     * the middle, and flares again at the toe, with the comb sloping down about
-     * 5 degrees and the butt raked back. That silhouette is the reason a
-     * Kalashnikov reads as a wedge and an AR reads as a tube.
+     * Version one was `box(0.03, 0.058, len)` plus an 88 mm butt pad — a rectangle
+     * with a taller rectangle on the end, measured on screen as a featureless slab
+     * occupying a quarter of the weapon. Version two tapered it with five stacked
+     * boxes, and that traded one defect for another: five boxes have four JOINTS,
+     * and at the board's light those joints read as a staircase down the comb.
+     * Combined with the plank texture the wood then had, the whole stock looked
+     * like masonry.
      *
-     * Built from three tapering segments plus the plate, because a single box
-     * cannot taper and the taper is the identity.
+     * The right primitive is an extrusion of the stock's SIDE PROFILE, which is
+     * what a real stock is: a shape cut from a blank and then rounded off. One
+     * solid, no joints, and the silhouette is stated once as a polygon instead of
+     * being approximated by a stack.
+     *
+     * The profile, in weapon space, all of it real AK geometry:
+     *   * the comb drops about 5 degrees from the receiver to the heel;
+     *   * the belly is deeply scalloped, which is what makes a Kalashnikov stock
+     *       read as a wedge rather than a plank;
+     *   * the toe flares back out, so the buttplate is deeper than the waist;
+     *   * the wrist is the narrowest section, just behind the trigger group.
      */
-    // Five segments, not three: at three the taper reads as a staircase, which is
-    // a worse defect than the slab it replaced.
-    const segs = 5;
-    for (let i = 0; i < segs; i++) {
-      const t = (i + 0.5) / segs;
-      // Deep at the receiver (58 mm), waisted at 0.55, flaring to 66 mm at the toe.
-      const h = 0.058 * (1 - t * 0.34) + 0.028 * t * t;
-      const w = 0.031 * (1 - t * 0.1);
-      const seg = box(w, h, (len / segs) * 1.08, 0.0035, 2);
-      body.add(seg, furnitureMat(spec), {
-        y: spec.bore - 0.022 - t * 0.014,
-        z: spec.zUpperRear + len * ((i + 0.5) / segs),
-        rx: -0.06,
-      });
-      seg.dispose();
-    }
-    // Sling slot through the stock: a real hole near the wrist, which is what
-    // stops the taper reading as a solid wedge of nothing.
-    const slot = box(0.034, 0.012, 0.026, 0.001, 1);
-    body.add(slot, M.cavity, { y: spec.bore - 0.038, z: spec.zUpperRear + len * 0.3 });
+    const y0 = spec.bore - 0.022;
+    const z0 = spec.zUpperRear;
+    const z1 = spec.stockRear;
+    // Profile points are (z, y) so the extrusion depth becomes the stock's WIDTH.
+    const profile = [
+      [z0, y0 + 0.026],           // top, at the receiver
+      [z1 - 0.004, y0 - 0.004],   // comb, dropping toward the heel
+      [z1 + 0.002, y0 - 0.048],   // heel
+      [z1 - 0.006, y0 - 0.062],   // toe, flared back out
+      [z0 + len * 0.52, y0 - 0.05],
+      [z0 + len * 0.26, y0 - 0.036], // the scalloped belly
+      [z0 + 0.004, y0 - 0.03],    // wrist: the narrowest section
+    ];
+    const stock = extrude(profile, 0.031, { bevel: 0.0035, bevelSegments: 2 });
+    /**
+     * `extrude()` builds the shape in XY and pushes it along Z, so the profile
+     * arrives lying in the wrong plane: it has to be stood upright, and the
+     * extrusion depth then becomes the stock's width.
+     *
+     * The SIGN of that rotation is load-bearing and was wrong first time.
+     * `rotateY(+PI/2)` maps shape-X to world −Z, which mirrors the profile about
+     * the muzzle: the buttstock was drawn 300 mm in FRONT of the receiver, sitting
+     * on top of the gas tube, and the shoulder end of the weapon was empty.
+     * `-PI/2` maps shape-X to world +Z, so a profile point written at z = +0.34
+     * lands at +0.34 — behind the receiver, where a stock goes.
+     */
+    stock.rotateY(-Math.PI / 2);
+    body.add(stock, furnitureMat(spec), {});
+    stock.dispose();
+
+    // Sling slot through the wrist: a real hole, which is what stops the taper
+    // reading as a solid wedge of nothing.
+    const slot = box(0.034, 0.011, 0.026, 0.001, 1);
+    body.add(slot, M.cavity, { y: y0 - 0.016, z: z0 + len * 0.28 });
     slot.dispose();
-    // Steel butt plate with the trap door, not a rubber brick.
-    const plate = box(0.032, 0.062, 0.008, 0.0022, 2);
-    body.add(plate, M.steel, { y: spec.bore - 0.044, z: spec.stockRear - 0.002, rx: -0.06 });
+    // Steel butt plate with its trap door, not a rubber brick.
+    const plate = box(0.032, 0.058, 0.007, 0.002, 2);
+    body.add(plate, M.steel, { y: y0 - 0.032, z: z1 - 0.001, rx: -0.06 });
     plate.dispose();
-    const trap = box(0.02, 0.026, 0.003, 0.0007, 1);
-    body.add(trap, M.soot, { y: spec.bore - 0.05, z: spec.stockRear + 0.003 });
+    const trap = box(0.019, 0.024, 0.003, 0.0007, 1);
+    body.add(trap, M.soot, { y: y0 - 0.04, z: z1 + 0.003 });
     trap.dispose();
     return;
   }

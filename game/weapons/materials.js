@@ -568,68 +568,92 @@ export const WEAPON_MATERIALS = {
    * `scale: 0.09` puts roughly one growth-ring period across a handguard rather
    * than across a wall, which is what stops it looking like planking.
    */
+  /**
+   * ARSENAL WOOD — laminated birch furniture (АКМ, СВД, M870).
+   *
+   * ---------------------------------------------------------------------------
+   * WHY IT EXISTS
+   * ---------------------------------------------------------------------------
+   * `furnitureMat()` in the model builder used to map `woodFurniture` onto
+   * `rubber`, i.e. onto the DARKEST material on the weapon (0.0049 linear,
+   * deliberately near-black overmould). An АКМ's wood therefore rendered as the
+   * same black as an M416's polymer, and one of the two loudest identity cues a
+   * Kalashnikov has — warm wood against blued steel — was simply absent.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY IT USES `gunstock` AND NOT `wood`
+   * ---------------------------------------------------------------------------
+   * This material's first version pointed at the world's `wood` surface, and the
+   * result was reported immediately and correctly: the buttstock read as a BRICK
+   * WALL. `wood` is architectural — it lays out five rows of two boards with butt
+   * joints, gaps and nails — and squeezing that into a 90 mm tile repeats the
+   * plank grid every few centimetres. It was not a scale that needed tuning; the
+   * thing being tiled was a floor.
+   *
+   * `gunstock` (game/materials/glsl/surfaces-organic.js) is one billet: grain
+   * along the length, stretched figure, laminate glue lines that are FLUSH rather
+   * than gaps, satin shellac, and wear that exposes pale bare fibre. Authored at
+   * 0.30 m so one tile covers a whole buttstock and there is nothing to repeat.
+   *
+   * ---------------------------------------------------------------------------
+   * EXPOSURE, measured three times
+   * ---------------------------------------------------------------------------
+   * The whole bank sits about ten times under physical albedo because the
+   * viewmodel light rig delivers roughly 20x the world's irradiance per unit
+   * albedo (see the long note on `glove`). 0.395 read as raw pine plank —
+   * brighter than the anodised receiver it is bolted to, which is backwards.
+   * 0.255 was still a pale orange-tan. 0.165 lands the handguard around L=95-120
+   * against a receiver at L=70-85: clearly the lighter of the two, clearly warm,
+   * and still inside the range where the baked figure survives.
+   *
+   * The RATIO is held at ~3.1:1 red over blue through all three passes, because
+   * hue is what carries the read at 1080p, not value.
+   */
   wood: [
-    'wood',
+    'gunstock',
     {
       ...BASE,
-      bake: { size: 512, seed: 71, relief: 0.004, tintA: 0x6b4526, tintB: 0x3a2314 },
-      scale: 0.09,
-      /**
-       * MEASURED TWICE, on the board's own studio light, and both passes were too
-       * bright.
-       *
-       * 0.395 read as raw pine plank — brighter than the anodised receiver it is
-       * bolted to, which is backwards. 0.255 was still a pale orange-tan: the
-       * board's key is now 10.5 (it had to be, see shell/preview.js) and at that
-       * irradiance anything above ~0.18 albedo sits on the AgX shoulder, where the
-       * grain stops being visible at all and the wood reads as flat MDF.
-       *
-       * 0.165 lands the handguard around L=95-120 against a receiver at L=70-85:
-       * clearly the lighter of the two, clearly warm, and still inside the range
-       * where the baked grain survives. Shellacked birch is a DARK warm brown that
-       * catches a highlight — it is not a light material.
-       *
-       * The RATIO is held at ~3.1:1 red over blue through all three passes, since
-       * that is what carries the hue separation from the cool alloy, and hue is
-       * what the eye reads at 1080p.
-       */
+      bake: { size: 512, worldSize: 0.3, relief: 0.004, seed: 61 },
+      scale: 0.3,
+      detailWorld: 0,
       tint: c(0.165, 0.112, 0.072),
       // Hand-oiled birch: satin, not gloss, and noticeably smoother than the
       // moulded nylon it has to be told apart from.
-      roughness: [0.52, 0.2, 0.34],
-      normalStrength: 1.15,
-      detail: [18, 0.85, 0.4, 7],
+      roughness: [0.5, 0.22, 0.34],
+      normalStrength: 1.0,
+      detail: [14, 0.7, 0.32, 8],
       // Wood wears at the EDGES and where the hand sits, and it wears LIGHTER
       // (bare fibre under the finish) where alloy wears brighter.
-      wear: [0.34, 0.72, 0.55, 0],
+      wear: [0.3, 0.72, 0.55, 0],
       wearColor: 0xa8794a,
-      wearMaterial: [0.42, 0.0, 0, 0.6],
+      wearMaterial: [0.4, 0.0, 0, 0.6],
       grimeColor: 0x140d07,
-      three: { physical: true, specularIntensity: 0.16, clearcoat: 0.22, clearcoatRoughness: 0.5 },
+      three: { physical: true, specularIntensity: 0.16, clearcoat: 0.24, clearcoatRoughness: 0.46 },
     },
   ],
 
   /**
-   * The darker, redder wood used on an SVD's thumbhole stock and an M870's
-   * furniture. Same surface, same calibration, one stop down and further into
-   * the red — a genuinely different piece of timber rather than a tint slider,
-   * so a Dragunov beside a Kalashnikov does not read as two copies of one prop.
+   * The darker, redder timber on an СВД's thumbhole stock and an M870's
+   * furniture. Same surface, same calibration, one stop down and further into the
+   * red — a genuinely different piece of wood rather than a tint slider, so a
+   * Dragunov beside a Kalashnikov is two blanks and not two copies of one prop.
    */
   wood_dark: [
-    'wood',
+    'gunstock',
     {
       ...BASE,
-      bake: { size: 512, seed: 137, relief: 0.0045, tintA: 0x4e2c17, tintB: 0x26150c },
-      scale: 0.075,
+      bake: { size: 512, worldSize: 0.34, relief: 0.0045, seed: 137 },
+      scale: 0.34,
+      detailWorld: 0,
       tint: c(0.126, 0.079, 0.05),
-      roughness: [0.46, 0.22, 0.36],
-      normalStrength: 1.2,
-      detail: [20, 0.9, 0.42, 7],
-      wear: [0.3, 0.74, 0.55, 0],
+      roughness: [0.44, 0.24, 0.36],
+      normalStrength: 1.05,
+      detail: [13, 0.72, 0.34, 8],
+      wear: [0.28, 0.74, 0.55, 0],
       wearColor: 0x8f6238,
-      wearMaterial: [0.4, 0.0, 0, 0.6],
+      wearMaterial: [0.38, 0.0, 0, 0.6],
       grimeColor: 0x120a05,
-      three: { physical: true, specularIntensity: 0.17, clearcoat: 0.3, clearcoatRoughness: 0.42 },
+      three: { physical: true, specularIntensity: 0.17, clearcoat: 0.32, clearcoatRoughness: 0.4 },
     },
   ],
 

@@ -413,3 +413,115 @@ void owSurface(vec2 uv, out vec3 alb, out float h, out float rough, out float me
   h = clamp(h, 0.0, 1.0);
 }
 `;
+
+/**
+ * GUNSTOCK — one billet of timber, not decking.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS AS ITS OWN SURFACE
+ * ---------------------------------------------------------------------------
+ * `WOOD` above is architectural: it lays out FIVE ROWS OF TWO BOARDS with butt
+ * joints, gaps, bevelled edges and nails. That is exactly right for a market
+ * stall and exactly wrong for a rifle. Mapped at weapon scale the plank grid
+ * repeats every few centimetres, and the reported symptom was precise — an АКМ
+ * whose buttstock read as a brick wall. No amount of tuning `scale` fixes it,
+ * because the thing being tiled is a floor.
+ *
+ * A gun stock is ONE piece of walnut or laminated birch:
+ *
+ *   * grain runs along the length, continuous, with no joints anywhere;
+ *   * growth rings are stretched almost flat by the way the blank is sawn, so
+ *     the figure reads as long streaks rather than concentric rings;
+ *   * laminate (which is what an АКМ and an СВД actually have) shows a few
+ *     straight glue lines PARALLEL to the length — the one linear feature that
+ *     belongs here, and it must not look like a butt joint;
+ *   * the finish is shellac or oil: satin, and it is the finish rather than the
+ *     wood that carries the highlight;
+ *   * wear is at the CORNERS and where the hand and cheek sit, and it exposes
+ *     pale bare fibre.
+ *
+ * ---------------------------------------------------------------------------
+ * ORIENTATION
+ * ---------------------------------------------------------------------------
+ * The grain runs along +U. Triplanar projection means U is not guaranteed to be
+ * the weapon's long axis on every face, which is why the streaks are made
+ * strongly anisotropic but not infinitely so: on a face where the mapping is
+ * rotated the result reads as cross-grain end figure, which is what the real
+ * part shows on its end faces anyway.
+ */
+export const GUNSTOCK = /* glsl */ `
+void owSurface(vec2 uv, out vec3 alb, out float h, out float rough, out float metal, out float ao){
+  const vec2 P = vec2(8.0);
+  vec2 p = uv * P + uSeed * 7.3;
+
+  // ---- the figure: growth rings stretched along the grain ------------------
+  // Sheared and heavily stretched along U so the rings become long streaks. The
+  // warp is what stops them reading as printed stripes.
+  vec2 gp = owShear(p * vec2(1.0, 5.5), 0.0, 1.0);
+  vec2 gper = P * vec2(1.0, 5.5);
+  float warp = owFbm(gp * vec2(0.7, 2.2), gper * vec2(0.7, 2.2), 4, 0.55);
+  float ring = fract(gp.y * 2.6 + warp * 1.35);
+  float late = smoothstep(0.34, 0.56, ring);              // dense latewood band
+  float dark = smoothstep(0.44, 0.5, ring) * (1.0 - smoothstep(0.5, 0.60, ring));
+
+  // ---- fibre and pores ----------------------------------------------------
+  // Two anisotropic bands an order of magnitude apart: the visible fibre, and
+  // the open pores that make walnut walnut rather than plastic.
+  float fibre = owFbm01(owShear(p * vec2(4.0, 34.0), 0.0, 1.0), owShearPer(P * vec2(4.0, 34.0), 1.0), 4, 0.5);
+  float pore  = owFbm01(p * vec2(26.0, 150.0), P * vec2(26.0, 150.0), 3, 0.5);
+
+  // ---- laminate glue lines ------------------------------------------------
+  // Three or four straight, thin, dark lines parallel to the grain. Deliberately
+  // NOT gaps: no height step, no ambient occlusion, no bevel — a glue line is
+  // flush, and the moment it gets depth it becomes a butt joint again.
+  float lamCoord = uv.y * 3.5 + owHash11(uSeed * 3.1) * 4.0;
+  float lam = fract(lamCoord);
+  float glue = smoothstep(0.030, 0.0, min(lam, 1.0 - lam));
+
+  // ---- colour ------------------------------------------------------------
+  // Warm mid brown with a redder late band. These are shellacked-birch values;
+  // the material's own 'tint' shifts the whole family per weapon.
+  vec3 wLight = owSRGB(vec3(0.455, 0.330, 0.215));
+  vec3 wMid   = owSRGB(vec3(0.330, 0.218, 0.130));
+  vec3 wDark  = owSRGB(vec3(0.190, 0.115, 0.062));
+  vec3 c = mix(wLight, wMid, late * 0.85);
+  c = mix(c, wDark, dark * 0.55);
+  c *= 0.93 + 0.14 * fibre;
+  c = mix(c, wDark * 0.72, glue * 0.75);
+
+  // A slow, large blotch: figure varies along a real blank, and a perfectly
+  // even stock is the tell of a procedural one.
+  float blotch = owFbm01(p * 0.55, P * 0.55, 3, 0.6);
+  c *= 0.90 + 0.20 * blotch;
+
+  // ---- the finish --------------------------------------------------------
+  // Satin shellac. The pores break it up, which is the whole reason a varnished
+  // stock does not read as a plastic one: the highlight is interrupted along the
+  // grain, not uniformly.
+  rough = 0.34 + 0.16 * (1.0 - late) + 0.14 * pore + 0.05 * (1.0 - blotch);
+
+  // ---- handling wear -----------------------------------------------------
+  // Rubbed-through finish exposing pale bare fibre. Raises albedo and roughness
+  // together, which is what worn-through varnish actually does — unlike metal,
+  // where wear brightens and SMOOTHS.
+  float rub = smoothstep(0.62, 0.95, owFbm01(p * 1.8, P * 1.8, 4, 0.55));
+  c = mix(c, wLight * 1.22, rub * 0.42);
+  rough += rub * 0.16;
+
+  // Dents: a stock lives in a vehicle. Shallow, rounded, sparse.
+  float dent = owWorley(p * 3.2, P * 3.2, 0.9).x;
+  float dented = smoothstep(0.30, 0.0, dent) * step(0.72, owHash12(floor(p * 3.2)));
+  rough += dented * 0.12;
+
+  h = 0.62 + (fibre - 0.5) * 0.055 - dark * 0.02 - late * 0.012 + (pore - 0.5) * 0.02;
+  h -= dented * 0.10;
+  // Glue lines are flush: height and AO deliberately untouched by 'glue'.
+
+  metal = 0.0;
+  ao = 1.0 - dented * 0.16;
+
+  alb = clamp(c, vec3(0.02), vec3(0.62));
+  rough = clamp(rough, 0.16, 0.80);
+  h = clamp(h, 0.0, 1.0);
+}
+`;

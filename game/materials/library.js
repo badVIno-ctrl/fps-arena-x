@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CONCRETE, BRICK, PLASTER, TILE } from './glsl/surfaces-arch.js';
 import { ASPHALT, SAND, DIRT, GRAVEL } from './glsl/surfaces-ground.js';
 import { METAL_RUST, METAL_PAINTED, METAL_BRUSHED, CORRUGATED } from './glsl/surfaces-metal.js';
-import { WOOD, FABRIC, BURLAP, FOLIAGE, RUBBER, GLASS } from './glsl/surfaces-organic.js';
+import { WOOD, GUNSTOCK, FABRIC, BURLAP, FOLIAGE, RUBBER, GLASS } from './glsl/surfaces-organic.js';
 
 /**
  * The surface library.
@@ -273,6 +273,36 @@ export const LIBRARY = {
       weather: [0.3, 0.35, 0.5, 0.45],
       wearColor: 0xa88b62,
       wearMaterial: [0.5, 0.0, 0, 0.7],
+    },
+  },
+  /**
+   * GUN STOCK — one billet, not decking. See the long note on GUNSTOCK in
+   * glsl/surfaces-organic.js for why `wood` cannot be reused at weapon scale:
+   * it lays out five rows of two boards with butt joints, and an АКМ buttstock
+   * mapped at 90 mm therefore rendered as a brick wall.
+   *
+   * Authored at `worldSize: 0.30`, which is roughly the length of a buttstock, so
+   * one tile covers the whole part and there is no repetition to see. Relief is
+   * 4 mm rather than the 38 mm architectural wood uses — the deepest feature on a
+   * finished stock is a dent, not a plank gap.
+   */
+  gunstock: {
+    glsl: GUNSTOCK,
+    surface: 'wood',
+    bake: { size: 512, worldSize: 0.3, relief: 0.004, seed: 61 },
+    mat: {
+      scale: 0.3,
+      parallax: 0,
+      // The micro tooth has to stay at gun scale: `detailWorld` is for surfaces
+      // mapped at 0.3 m or coarser, and this sits exactly on that boundary, so
+      // it is disabled and detail[0] is used directly.
+      detailWorld: 0,
+      detail: [14, 0.7, 0.34, 8],
+      macro: [0.12, 0.22, 0.1, 0.2],
+      macroBig: [1, 0, 0.03, 0],
+      weather: [0, 0, 0, 0.2],
+      wearColor: 0xb08a5c,
+      wearMaterial: [0.42, 0.0, 0, 0.6],
     },
   },
   fabric: {
