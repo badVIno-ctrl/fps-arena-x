@@ -64,7 +64,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: pip install -r server/requirements.txt
+      # requirements-dev pulls in requirements plus httpx, which starlette's
+      # TestClient needs and the production image deliberately does not have.
+      - run: pip install -r server/requirements-dev.txt
 
       - name: keepalive unit tests
         working-directory: server

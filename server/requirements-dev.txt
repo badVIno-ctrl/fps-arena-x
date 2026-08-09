@@ -1,0 +1,6 @@
+# Test-only dependencies. Deliberately NOT in requirements.txt: the production
+# image installs that file, and httpx exists solely so starlette's TestClient can
+# drive the app in CI. The keep-alive itself uses urllib for the same reason — one
+# GET every ten minutes does not justify an HTTP client in the runtime image.
+-r requirements.txt
+httpx==0.27.2
