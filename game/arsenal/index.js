@@ -102,7 +102,8 @@ export class ArsenalSystem {
       });
 
       const rig = new HardwareRig({ weaponId: id, root: entry.group, material: materialFor }).bind(def);
-      rig.setLoadout(shell?.loadoutFor?.(id) ?? defaultLoadout(def));
+      // Seated instantly: this is a restore at boot, not a player fitting a part.
+      rig.setLoadout(shell?.loadoutFor?.(id) ?? defaultLoadout(def), { animate: false });
       this.rigs.set(id, rig);
     }
 

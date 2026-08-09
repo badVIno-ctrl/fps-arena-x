@@ -76,6 +76,32 @@ export class HardwareRig {
     this.state = { laserOn: false, lightOn: false, bipodDeployed: false, swapT: 1 };
 
     /**
+     * MOUNT ANIMATION.
+     *
+     * `swapT` existed already and nothing read it, so mounting was a hard cut: a
+     * scope teleported onto the rail between two frames. Reported as part of "все
+     * это должно быть с анимациями" — and it is not decoration. A hard cut gives
+     * the player no evidence that their click did anything, which is the other
+     * half of "ставлю модуль, а на доске не отображается": even when the geometry
+     * DID change, nothing on screen moved to say so.
+     *
+     * Each slot animates along the direction the part is physically fitted from,
+     * because that is what makes the motion legible as fitting rather than as a
+     * wobble:
+     *
+     *   optic        lifts off the rail, upward — you drop a scope onto a rail
+     *   muzzle       threads off the crown, forward
+     *   tactical     comes off the side rail, sideways
+     *   underbarrel  drops off the bottom rail, downward
+     *   magazine     falls out of the well, downward and tilted
+     *
+     * Removal runs the same path backwards and the object stays VISIBLE until it
+     * has travelled — hiding it on the click would be the same hard cut in
+     * reverse.
+     */
+    this._anim = new Map();
+
+    /**
      * Resolved-stats memo. `stats()` re-folds every mounted part and allocates a
      * fresh loadout object, which was fine when only the gunsmith board called it
      * once per click. The camera now reads `zoom` every frame, so cache the result
@@ -89,6 +115,24 @@ export class HardwareRig {
     this.disposed = false;
   }
 
+  /* ------------------------------------------------------------ animation */
+
+  /**
+   * Where a part travels from, in metres, and how long it takes.
+   *
+   * Distances are the ones a hand actually moves the part through when fitting
+   * it — a scope lifts a couple of centimetres off the rail, a suppressor threads
+   * off the muzzle by more than that — and the durations are all inside 0.3 s
+   * because this is feedback, not a cutscene.
+   */
+  static ANIM = {
+    optic: { from: [0, 0.05, 0.006], rot: [0.16, 0, 0], time: 0.24 },
+    muzzle: { from: [0, 0, -0.07], rot: [0, 0, 1.9], time: 0.28 },
+    tactical: { from: [0.052, 0, 0], rot: [0, 0.22, 0], time: 0.22 },
+    underbarrel: { from: [0, -0.05, 0.008], rot: [-0.2, 0, 0], time: 0.24 },
+    magazine: { from: [0, -0.09, -0.012], rot: [0.24, 0, 0], time: 0.22 },
+  };
+
   /* ---------------------------------------------------------------- rails */
 
   /** Called once by the weapon builder so empty rails still read as mounts. */
@@ -98,8 +142,14 @@ export class HardwareRig {
 
   /* --------------------------------------------------------------- mount */
 
-  /** Build (or fetch) a unit and hang it on the weapon. */
-  mount(attId) {
+  /**
+   * Build (or fetch) a unit and hang it on the weapon.
+   *
+   * @param {string} attId
+   * @param {{animate?: boolean}} [o]  `false` seats it instantly, for restoring a
+   *   saved build. A restore is not a player action and must not look like one.
+   */
+  mount(attId, o = {}) {
     const att = ATTACHMENTS[attId];
     if (!att) throw new Error(`unknown attachment ${attId}`);
     const check = canMount(this.defs ?? this.def(), attId);
@@ -131,14 +181,35 @@ export class HardwareRig {
     if (att.slot === 'tactical') this.#wireTactical(unit);
     // A fresh optic starts un-zeroed for the swap animation, then settles.
     if (att.slot === 'optic') this.state.swapT = 0;
+    if (o.animate === false) {
+      this._anim.delete(att.slot);
+      unit.object.visible = true;
+      this.#applyAnim(unit.object, HardwareRig.ANIM[att.slot], 1);
+    } else {
+      this.#animate(att.slot, unit, 1);
+    }
     return { ok: true, unit };
   }
 
   /** Take a part off. Geometry stays cached; only visibility changes. */
-  unmount(slot) {
+  unmount(slot, o = {}) {
     const unit = this.mounted[slot];
     if (!unit) return false;
-    unit.object.visible = false;
+    if (o.animate === false) {
+      this._anim.delete(slot);
+      unit.object.visible = false;
+      this.mounted[slot] = null;
+      this._rev += 1;
+      if (slot === 'tactical') {
+        this.#lightsOff();
+        if (this.beam) this.beam.visible = false;
+        if (this.dot) this.dot.visible = false;
+      }
+      return true;
+    }
+    // Visible until it has travelled: hiding it on the click is the same hard cut
+    // the mount animation exists to remove, just in reverse.
+    this.#animate(slot, unit, 0);
     this.mounted[slot] = null;
     this._rev += 1;
     if (slot === 'tactical') {
@@ -150,22 +221,37 @@ export class HardwareRig {
   }
 
   /** Quick-swap: unmount whatever is in the slot and mount `attId` instead. */
-  swap(slot, attId) {
-    if (attId === null) return this.unmount(slot);
-    this.unmount(slot);
-    return this.mount(attId);
+  swap(slot, attId, o = {}) {
+    if (attId === null) return this.unmount(slot, o);
+    this.unmount(slot, o);
+    return this.mount(attId, o);
   }
 
-  /** Apply a whole loadout at once (used on spawn and by the gunsmith board). */
-  setLoadout(loadout) {
+  /**
+   * Apply a whole loadout at once (used on spawn and by the gunsmith board).
+   *
+   * ONLY SLOTS THAT ACTUALLY CHANGED ARE TOUCHED, and that is what makes the mount
+   * animation usable at all. The board commits a whole loadout object on every
+   * click, so unconditionally unmounting and remounting all five slots meant that
+   * fitting a suppressor also re-seated the optic, the light, the grip and the
+   * magazine — four animations the player did not ask for, all restarting the one
+   * they did. It was also four rebuild lookups per click for no change.
+   *
+   * @param {object} loadout
+   * @param {{animate?: boolean}} [o] `false` restores a saved build instantly.
+   */
+  setLoadout(loadout, o = {}) {
     const rejected = [];
+    const before = this.loadout();
     for (const slot of SLOT_ORDER) {
       const id = loadout[slot] ?? null;
+      const was = before[slot] ?? null;
+      if (was === id) continue;
       if (!id) {
-        this.unmount(slot);
+        this.unmount(slot, o);
         continue;
       }
-      const r = this.swap(slot, id);
+      const r = this.swap(slot, id, o);
       if (r && r.ok === false) rejected.push({ id, reason: r.reason });
     }
     return rejected;
@@ -218,9 +304,84 @@ export class HardwareRig {
    * @param {number} dt
    * @param {{ hitDistance:number }} aim distance to whatever the bore is pointing at
    */
+  /**
+   * Start (or reverse) a slot's fit animation.
+   *
+   * Keyed by SLOT rather than by unit, because swapping one optic for another has
+   * to be a single motion: the old one leaves and the new one arrives on the same
+   * timeline, and two independent animations on one rail would have them pass
+   * through each other.
+   */
+  #animate(slot, unit, target) {
+    const spec = HardwareRig.ANIM[slot];
+    if (!spec || !unit?.object) return;
+    const prev = this._anim.get(slot);
+    /**
+     * A DIFFERENT PART TAKING OVER THIS SLOT ENDS THE PREVIOUS ONE'S TRAVEL.
+     *
+     * Measured on the board (tools/lab/mount.mjs): swapping a red dot back to
+     * irons left the red dot VISIBLE and the mesh count unchanged, so the weapon
+     * kept both sights. `swap()` is `unmount()` then `mount()`, the unmount starts
+     * the old unit travelling out, and the mount then overwrote the slot's single
+     * animation record — so the outgoing part never reached its target and the
+     * "hide it now" branch was never reached.
+     *
+     * One record per slot is the right shape (two independent animations on one
+     * rail would pass through each other), so the outgoing part is retired here
+     * instead: it disappears as the new one arrives, which reads as a swap.
+     */
+    if (prev && prev.unit !== unit && this.mounted[slot] !== prev.unit) {
+      prev.unit.object.visible = false;
+    }
+    // Reversing mid-flight resumes from where it is rather than snapping.
+    const t = prev && prev.unit === unit ? prev.t : target > 0 ? 0 : 1;
+    this._anim.set(slot, { unit, t, target, spec });
+    unit.object.visible = true;
+    this.#applyAnim(unit.object, spec, t);
+  }
+
+  /**
+   * Place a part `t` of the way home. `t = 1` is seated, and it must be EXACTLY
+   * the identity transform at that point — the placement is baked into the
+   * assembly's own geometry (see hardware/build.js), so any residue here is a
+   * permanently misaligned attachment rather than a wobble that settles.
+   */
+  #applyAnim(obj, spec, t) {
+    if (t >= 1) {
+      obj.position.set(0, 0, 0);
+      obj.rotation.set(0, 0, 0);
+      return;
+    }
+    // Ease out: fast off the mark, settling in. A linear fit reads mechanical in
+    // the wrong way — like a part sliding on ice rather than being placed.
+    const k = 1 - (1 - t) * (1 - t);
+    const u = 1 - k;
+    obj.position.set(spec.from[0] * u, spec.from[1] * u, spec.from[2] * u);
+    obj.rotation.set(spec.rot[0] * u, spec.rot[1] * u, spec.rot[2] * u);
+  }
+
+  /** True while any part is still travelling. The board dims its stats on it. */
+  get animating() {
+    return this._anim.size > 0;
+  }
+
   update(dt, aim) {
     if (this.disposed) return;
     if (this.state.swapT < 1) this.state.swapT = Math.min(1, this.state.swapT + dt * 6);
+
+    // ---- mount / unmount motion ------------------------------------------
+    if (this._anim.size) {
+      for (const [slot, a] of this._anim) {
+        const step = dt / a.spec.time;
+        a.t = a.target > a.t ? Math.min(1, a.t + step) : Math.max(0, a.t - step);
+        this.#applyAnim(a.unit.object, a.spec, a.t);
+        if (a.t !== a.target) continue;
+        // Arrived. A part that travelled OUT is hidden only now, and only if
+        // nothing has since been mounted in its place.
+        if (a.target === 0 && this.mounted[slot] !== a.unit) a.unit.object.visible = false;
+        this._anim.delete(slot);
+      }
+    }
 
     const tac = this.mounted.tactical;
     if (!tac) return;

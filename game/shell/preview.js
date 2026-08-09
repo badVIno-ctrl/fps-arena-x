@@ -175,7 +175,9 @@ export class BenchPreview {
       this.mount.add(node);
       const rig = new HardwareRig({ weaponId: id, root: node, material: this.materialFor });
       rig.bind(def);
-      rig.setLoadout(defaultLoadout(def));
+      // First sight of a weapon on the board shows it already built, not
+      // assembling itself.
+      rig.setLoadout(defaultLoadout(def), { animate: false });
 
       entry = { id, def, model, node, parts, rig };
       this.built.set(id, entry);

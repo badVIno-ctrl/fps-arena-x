@@ -236,9 +236,27 @@ async function hardware() {
   });
   check('unmounting keeps geometry cached instead of rebuilding it', () => {
     assert(/this\.cache/.test(rigCode), 'no geometry cache');
-    const un = rigCode.slice(rigCode.indexOf('unmount(slot)'), rigCode.indexOf('swap(slot, attId)'));
+    // The signatures gained an options object when mounting became animated, so
+    // the slice is taken between the two method NAMES rather than between exact
+    // signatures — otherwise this check silently measures an empty string and
+    // passes for the wrong reason.
+    const un = rigCode.slice(rigCode.indexOf('unmount(slot'), rigCode.indexOf('swap(slot'));
+    assert(un.length > 40, 'could not locate unmount(): the check would pass vacuously');
     assert(/visible = false/.test(un), 'unmount should hide, not destroy');
     assert(!/dispose\(\)/.test(un), 'unmount must not dispose: the player swaps back constantly');
+  });
+  check('fitting a part is animated, and only the slot that changed moves', () => {
+    assert(/ANIM = \{/.test(rigCode), 'no mount-animation table: parts would teleport onto the rail');
+    for (const slot of ['optic', 'muzzle', 'tactical', 'underbarrel', 'magazine']) {
+      assert(new RegExp(`\\b${slot}:\\s*\\{ from:`).test(rigCode), `no fit path for the ${slot} slot`);
+    }
+    const sl = rigCode.slice(rigCode.indexOf('setLoadout(loadout'), rigCode.indexOf('toggleLaser'));
+    assert(
+      /was === id/.test(sl),
+      'setLoadout re-seats every slot: the board commits a whole loadout per click, so ' +
+        'fitting a suppressor would restart the optic, light, grip and magazine animations',
+    );
+    assert(/animate: false|animate === false/.test(rigCode), 'no way to restore a build instantly');
   });
   check('a magazine unit builds no magazine: there is only the animated one', () => {
     assert(
