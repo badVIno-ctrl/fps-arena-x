@@ -97,8 +97,21 @@ const SELF_WARMING = new Set(['fx']);
  */
 const RENDER_SHADOW_WARM = false;
 
-export async function prewarm(engine, { onProgress = () => {}, transients = false, drawFrames = false } = {}) {
+export async function prewarm(engine, { onProgress = null, transients = false, drawFrames = false } = {}) {
   const t0 = performance.now();
+  /**
+   * `onProgress` is OPTIONAL and may arrive as `null`, not just `undefined`.
+   *
+   * A default parameter value only fires for `undefined`, and boot.js builds the
+   * callback as `report && (f => ...)` — which is `null` whenever there is no
+   * menu to report to. That is exactly the capture path (`?capture=1`), so
+   * `onProgress` was `null`, `tick()` called it, and boot died with
+   * "t is not a function" *only* under the screenshot harness. Every visual gate
+   * has therefore been unable to boot the game at all, while a human player saw
+   * nothing wrong. Optional means optional: normalise it here rather than
+   * trusting nine call sites to pass the right flavour of nothing.
+   */
+  const report = typeof onProgress === 'function' ? onProgress : () => {};
   const render = engine.ctx.peek('render');
   const renderer = render?.renderer;
   if (!renderer) return { ok: false, reason: 'no renderer' };
@@ -173,7 +186,7 @@ export async function prewarm(engine, { onProgress = () => {}, transients = fals
   try {
     let step = 0;
     const totalSteps = WARM_POSES.length * 2 + (transients ? transientStages.length : 0) + 1;
-    const tick = () => onProgress(Math.min(1, ++step / totalSteps));
+    const tick = () => report(Math.min(1, ++step / totalSteps));
 
     // Pass 1: compile the static world from each pose, with the depth/shadow
     // variants reached by drawing a real frame at that pose.

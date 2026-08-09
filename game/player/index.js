@@ -135,6 +135,7 @@ export class PlayerSystem {
       armour: ARMOUR.plates * ARMOUR.perPlate,
       maxArmour: ARMOUR.plates * ARMOUR.perPlate,
       bleeding: false, bleedStacks: 0,
+      shielded: false, shieldLeft: 0,
     };
 
     this._tmp = new THREE.Vector3();
@@ -216,6 +217,24 @@ export class PlayerSystem {
     on('damage:dealt', (e) => this._onDamageDealt(e));
     on('explosion', (e) => this._onExplosion(e));
     on('bullet:impact', (e) => this._onBulletImpact(e));
+    /**
+     * Firing gives spawn protection up. Listening for the canonical event rather
+     * than reaching into the weapon system keeps the rule in one place and makes
+     * it true for every future way of putting a round downrange — grenades and
+     * melee included, once those emit.
+     */
+    on('weapon:fire', () => {
+      if (HEALTH.spawnShield.breakOnFire) this.health.dropShield('fired');
+    });
+    on('grenade:thrown', () => this.health.dropShield('thrown'));
+    on('melee:hit', () => this.health.dropShield('melee'));
+
+    /**
+     * The match begins the same way a respawn does, so it gets the same grace.
+     * Before this, only respawn() granted the shield, which meant the ONE spawn
+     * everybody experiences — the first — was the one with no protection at all.
+     */
+    this.health.grantShield();
 
     console.info(
       `[player] spawn ${spawn.feet.x.toFixed(1)}, ${spawn.feet.y.toFixed(2)}, ` +
@@ -565,6 +584,8 @@ export class PlayerSystem {
     h.dead = hp.dead;
     h.suppression = hp.suppression;
     h.shock = hp.shock;
+    h.shielded = hp.shielded;
+    h.shieldLeft = hp.shield;
     // 0..1 against tactical sprint, which is the fastest the player can move —
     // `ui` uses this directly as the reticle-bloom weight.
     h.move = Math.min(1, m.horizontalSpeed / MOVE.tacSprintSpeed);
@@ -807,6 +828,9 @@ export class PlayerSystem {
     const world = this.ctx.peek('world');
     const sp = world?.spawn?.(index);
     this.health.reset(true);
+    // Granted before the teleport, so the very first frame at the new position
+    // is already protected — an ordering bug here is a death on arrival.
+    this.health.grantShield();
     if (!sp?.position) return;
     const gy = this.physics.groundHeight(sp.position.x, sp.position.z, sp.position.y + 6);
     const feetY = Number.isFinite(gy) ? gy + 0.03 : sp.position.y;

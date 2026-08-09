@@ -52,6 +52,18 @@ export class Health {
       this.indicators.push({ active: false, angle: 0, amount: 0, life: 0, worldX: 0, worldY: 0, worldZ: 0 });
     }
 
+    /**
+     * Spawn protection, in seconds remaining. See HEALTH.spawnShield.
+     *
+     * Two counters rather than one, because invulnerability and being invisible
+     * to the AI have to end at different times — if they ended together, the
+     * frame the shield drops is the frame three bots already have a firing
+     * solution on your chest.
+     */
+    this.shield = 0;
+    this.shieldBlind = 0;
+    this.shieldBlocked = 0;
+
     // Heartbeat: phase 0..1 per beat, with a double-thump envelope.
     this.beatPhase = 0;
     this.pulse = 0;
@@ -68,6 +80,7 @@ export class Health {
       armour: ARMOUR.plates * ARMOUR.perPlate,
       maxArmour: ARMOUR.plates * ARMOUR.perPlate,
       bleeding: false, bleedStacks: 0,
+      shielded: false, shieldLeft: 0,
     };
     this._emitTimer = 0;
     this._lastEmitHealth = HEALTH.max;
@@ -84,6 +97,42 @@ export class Health {
 
   get critical() {
     return this.fraction < HEALTH.criticalThreshold;
+  }
+
+  /** Incoming fire cannot hurt you. */
+  get shielded() {
+    return this.shield > 0;
+  }
+
+  /** The AI is not allowed to acquire you yet. */
+  get unseen() {
+    return this.shieldBlind > 0;
+  }
+
+  /**
+   * Start (or extend) spawn protection. Idempotent by design: the mode system
+   * grants it at match start and again on every respawn, and two grants landing
+   * on the same frame must not stack into ten seconds of immunity.
+   */
+  grantShield(time = HEALTH.spawnShield.time, blind = HEALTH.spawnShield.blind) {
+    this.shield = Math.max(this.shield, time);
+    this.shieldBlind = Math.max(this.shieldBlind, Math.min(blind, time));
+    this.shieldBlocked = 0;
+    this._emitState(true);
+  }
+
+  /**
+   * Give the protection up. Called when the player fires: a shield you can shoot
+   * from is not protection. The blind window goes with it — staying invisible to
+   * the AI after opening fire would be worse than the shield itself.
+   */
+  dropShield(reason = 'fired') {
+    if (this.shield <= 0 && this.shieldBlind <= 0) return false;
+    this.shield = 0;
+    this.shieldBlind = 0;
+    this.ctx.events.emit('player:shield', { active: false, left: 0, reason });
+    this._emitState(true);
+    return true;
   }
 
   /** Number of open wounds. */
@@ -158,6 +207,26 @@ export class Health {
    */
   damage(amount, from, opts = {}) {
     if (this.dead || amount <= 0) return 0;
+
+    /**
+     * Spawn protection comes FIRST, before armour, before wounds, before the
+     * camera punch. Not a damage multiplier of zero: a hit that is filtered here
+     * must leave no residue at all — no plate wear, no bleed, no suppression, no
+     * flinch — or the player would be knocked around by rounds that officially
+     * never landed.
+     *
+     * Falls are exempt on purpose. The shield exists to stop other actors
+     * killing you before you can act; walking off a roof is you acting.
+     */
+    if (this.shield > 0 && opts.type !== 'fall') {
+      this.shieldBlocked += amount;
+      this.ctx.events.emit('damage:blocked', {
+        amount,
+        left: this.shield,
+        total: this.shieldBlocked,
+      });
+      return 0;
+    }
 
     // ---- armour --------------------------------------------------------
     // Plates cover the torso only, so a headshot is never soaked. `absorb` is
@@ -291,6 +360,20 @@ export class Health {
   update(dt) {
     const H = HEALTH;
 
+    // ---- spawn protection ------------------------------------------------
+    // Ticked on the real clock and announced on the frame it ends, so the HUD
+    // can count it down and the AI can see the handover rather than polling.
+    if (this.shieldBlind > 0) this.shieldBlind = Math.max(0, this.shieldBlind - dt);
+    if (this.shield > 0) {
+      this.shield = Math.max(0, this.shield - dt);
+      this.ctx.events.emit('player:shield', {
+        active: this.shield > 0,
+        left: this.shield,
+        blind: this.shieldBlind,
+        reason: this.shield > 0 ? 'tick' : 'expired',
+      });
+    }
+
     // ---- bleeding -------------------------------------------------------
     // Runs before regen so an open wound holds recovery shut: you have to break
     // contact AND wait out the clot, not just break contact.
@@ -396,6 +479,8 @@ export class Health {
     s.maxArmour = this.maxArmour;
     s.bleeding = this.bleeding;
     s.bleedStacks = this.bleedStacks;
+    s.shielded = this.shielded;
+    s.shieldLeft = this.shield;
     this._lastEmitHealth = this.value;
     s.changedLowState = wasLow !== s.low;
     s.forced = !!force;

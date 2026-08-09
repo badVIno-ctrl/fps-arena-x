@@ -307,6 +307,21 @@ export class Agent {
   _sense(dt) {
     const player = this.ai.playerPosition(this._v3);
     if (!player) return;
+
+    /**
+     * A player still inside their spawn window is not a target yet.
+     *
+     * The awareness pool is drained rather than merely held, so the moment the
+     * window closes every bot has to build a fresh solution from zero — which is
+     * the difference between "the shield expired" and "the shield expired and
+     * four rifles were already zeroed on my chest".
+     */
+    if (this.ai.playerUnseen) {
+      this.targetVisible = false;
+      this.awareness = Math.max(0, this.awareness - dt * 1.6);
+      if (this.hasTarget && this.lastKnownAge > 2.5) this.hasTarget = false;
+      return;
+    }
     const eye = this.eye;
     const to = this._dir.copy(player).sub(eye);
     const dist = to.length();

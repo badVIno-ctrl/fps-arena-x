@@ -135,6 +135,9 @@ export class UiSystem {
       exhausted: false,
       bleeding: false,
       bleedStacks: 0,
+      /** Seconds of spawn protection left; 0 hides the badge entirely. */
+      shielded: false,
+      shieldLeft: 0,
       baseSpread: 5.5,
       scoreUs: 0,
       scoreThem: 0,
@@ -485,6 +488,8 @@ export class UiSystem {
       if (ps.exhausted !== undefined) s.exhausted = !!ps.exhausted;
       if (ps.bleeding !== undefined) s.bleeding = !!ps.bleeding;
       if (ps.bleedStacks !== undefined) s.bleedStacks = ps.bleedStacks;
+      if (ps.shieldLeft !== undefined) s.shieldLeft = ps.shieldLeft;
+      if (ps.shielded !== undefined) s.shielded = !!ps.shielded;
     } else if (player && typeof player.health === 'number') {
       s.health = player.health;
     }

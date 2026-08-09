@@ -355,6 +355,33 @@ export const HEALTH = {
     effectScale: 0.45,
   },
 
+  /**
+   * SPAWN PROTECTION.
+   *
+   * Without this the garrison is already looking at the spawn pad when the match
+   * starts, so the first thing a player experiences is dying before they have
+   * moved — reported as "меня респавнит и меня сразу убивает". A wall between the
+   * spawn and the field would fix the symptom and break the level; a timed shield
+   * fixes the cause, which is that a player who cannot yet act is still a target.
+   *
+   * Two windows, deliberately different lengths:
+   *   `time`  invulnerability. Long enough to read the HUD and pick a direction.
+   *   `blind` how long the AI refuses to ACQUIRE you. Shorter, so the shield
+   *           never runs out while a bot is already mid-burst at your chest —
+   *           the overlap is the grace period that makes the handover survivable.
+   *
+   * Shooting gives the protection up, because a shield you can shoot from is not
+   * protection, it is an exploit. Moving does not: walking off the pad is exactly
+   * what the window is for.
+   */
+  spawnShield: {
+    time: 5.0,
+    blind: 3.2,
+    breakOnFire: true,
+    /** Fade the HUD badge over the last seconds so the handover is visible. */
+    warnAt: 1.6,
+  },
+
   /** Low-health screen treatment (desaturate + vignette + heartbeat). */
   effect: {
     desaturate: 0.62,

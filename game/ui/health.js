@@ -54,6 +54,19 @@ export class HealthFx {
     const stamTrack = el('div', 'ow-vt-track ow-stam-track', this.stam);
     this.stamFill = el('i', null, stamTrack);
 
+    /**
+     * SPAWN SHIELD badge.
+     *
+     * A countdown, not a static icon: the number is the whole message — "you
+     * cannot be hurt, and here is exactly how long that stays true". A shield
+     * with no visible clock is worse than none, because the player learns they
+     * are sometimes invulnerable and never learns when.
+     */
+    this.shield = el('div', 'ow-shield', this.vitals);
+    el('div', 'ow-sh-icon', this.shield);
+    el('div', 'ow-sh-lbl', this.shield, '\u0417\u0410\u0429\u0418\u0422\u0410 \u0421\u041f\u0410\u0412\u041d\u0410');
+    this.shieldNum = el('div', 'ow-sh-num', this.shield, '0.0');
+
     this.armour = el('div', 'ow-armour', this.vitals);
     el('div', 'ow-vt-lbl', this.armour, 'Armour');
     const plates = el('div', 'ow-arm-plates', this.armour);
@@ -194,6 +207,27 @@ export class HealthFx {
       setStyle(this.bleedTag, 'opacity', (this.bleedAlpha * pulse).toFixed(3));
     }
 
+    // --- spawn shield -----------------------------------------------------
+    const shieldLeft = Math.max(0, s.shieldLeft ?? 0);
+    const shielded = shieldLeft > 0.001;
+    this.shieldAlpha = damp(this.shieldAlpha ?? 0, shielded ? 1 : 0, shielded ? 22 : 8, dt);
+    setStyle(this.shield, 'display', this.shieldAlpha < 0.01 ? 'none' : 'flex');
+    if (this.shieldAlpha >= 0.01) {
+      setStyle(this.shield, 'opacity', this.shieldAlpha.toFixed(3));
+      const txt = shieldLeft.toFixed(1);
+      if (txt !== this._lastShield) {
+        this._lastShield = txt;
+        setText(this.shieldNum, txt);
+      }
+      // Flashes over the last second and a half so the handover is felt, not
+      // discovered by being shot.
+      const warn = shieldLeft < 1.6;
+      setClass(this.shield, 'warn', warn);
+      this.shieldPhase = (this.shieldPhase ?? 0) + dt * (warn ? 3.4 : 0.9);
+      const pulse = 0.72 + 0.28 * (0.5 - 0.5 * Math.cos(this.shieldPhase * Math.PI * 2));
+      setStyle(this.shield, '--sh-pulse', pulse.toFixed(3));
+    }
+
     // --- armour plates ----------------------------------------------------
     const maxA = s.maxArmour || 150;
     const armour = Math.max(0, s.armour ?? 0);
@@ -211,6 +245,7 @@ export class HealthFx {
   }
 
   dispose() {
+    this.shield.remove();
     this.bloodWrap.remove();
     this.beat.remove();
     this.desat.remove();

@@ -755,6 +755,20 @@ export class AiSystem {
     this._pathBudget = this.pathsPerFrame;
     this._updateRelevance(ctx);
 
+    /**
+     * SPAWN PROTECTION, read once per frame instead of per agent.
+     *
+     * Sixty agents each reaching for `ctx.peek('player').health.shielded` in
+     * their own `_sense()` is sixty registry lookups and sixty property chains
+     * per frame for one boolean that cannot change inside the loop. Latch it
+     * here; agents read `this.ai.playerUnseen`.
+     *
+     * Note what it does NOT do: agents already engaged keep their last known
+     * position and keep suppressing it. Making a fresh spawn erase the memory of
+     * every bot in the level would let a player reset a firefight by dying.
+     */
+    this.playerUnseen = !!ctx.peek('player')?.health?.unseen;
+
     for (const s of this.squads) s.update(dt);
 
     let alive = 0;

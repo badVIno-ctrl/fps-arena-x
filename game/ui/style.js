@@ -247,6 +247,36 @@ const CSS = `
   will-change: opacity;
 }
 
+/* Spawn shield badge.
+   Its own row above the armour, cyan-white so it never reads as damage, and
+   display:none while inactive so it cannot reserve space in the vitals stack.
+   The pulse comes in as a custom property written from dt (health.js), which is
+   what keeps it frozen when the game is. */
+.ow-shield {
+  display: none; align-items: center; gap: calc(var(--u) * 1.2);
+  margin-top: calc(var(--u) * 1.4);
+  --sh-pulse: 1;
+}
+.ow-sh-icon {
+  width: calc(10px * var(--k)); height: calc(12px * var(--k));
+  background: linear-gradient(180deg, #cfeeff, #6ec7f5);
+  clip-path: polygon(50% 0%, 100% 22%, 100% 62%, 50% 100%, 0% 62%, 0% 22%);
+  opacity: var(--sh-pulse);
+  box-shadow: 0 0 calc(8px * var(--k)) rgba(110,199,245,.55);
+}
+.ow-sh-lbl {
+  font-size: calc(9px * var(--k)); letter-spacing:.2em; font-weight:700;
+  color: rgba(190,232,255,.92); text-shadow: var(--o1);
+}
+.ow-sh-num {
+  margin-left:auto;
+  font: 700 calc(13px * var(--k))/1 var(--font-mono), ui-monospace, monospace;
+  color:#e6f6ff; font-variant-numeric: tabular-nums; text-shadow: var(--o1);
+}
+.ow-shield.warn .ow-sh-icon { background: linear-gradient(180deg,#ffe6b0,#f5a524); box-shadow: 0 0 calc(8px * var(--k)) rgba(245,165,36,.6); }
+.ow-shield.warn .ow-sh-lbl,
+.ow-shield.warn .ow-sh-num { color:#ffd79a; }
+
 /* armour: thinner, cyan, plate-segmented, its own label */
 .ow-armour {
   display:flex; align-items:center; gap: calc(var(--u) * 1.4);
