@@ -175,6 +175,31 @@ export class ShellSystem {
     return m;
   }
 
+  /**
+   * Compile the board's shaders during boot, not during play.
+   *
+   * `core/prewarm.js` finds this by duck typing — any subsystem with a
+   * `prewarmMaterials()` gets called behind the loading bar — so there is nothing
+   * to register. See `BenchPreview.prewarm` for the measurement and for why the
+   * board could freeze the game on open and again on close.
+   *
+   * Must never throw: prewarm catches, but a hook that reliably fails is a hook
+   * that reliably does nothing, so it reports instead.
+   */
+  async prewarmMaterials() {
+    if (!this.preview) return { ok: false, reason: 'no preview' };
+    // The weapon the player will actually be holding when they first press M, so
+    // the very first `setWeapon` on the board is a cache hit as well.
+    const startId = this.ctx.peek('weapons')?.activeId ?? ARSENAL_ORDER[0];
+    const def = ARSENAL_DEFS[startId] ?? ARSENAL_DEFS[ARSENAL_ORDER[0]];
+    const r = await this.preview.prewarm(def);
+    // Leave nothing shown: the board is closed, and a weapon left visible in the
+    // preview scene would be drawn the first time the render hook runs.
+    if (this.preview.current) this.preview.current.node.visible = false;
+    this.preview.current = null;
+    return r;
+  }
+
   /* ------------------------------------------------------------------ public */
 
   loadoutFor(weaponId) {

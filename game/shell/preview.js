@@ -65,20 +65,59 @@ export class BenchPreview {
     this.mount.name = 'preview-mount';
     this.spin.add(this.mount);
 
-    // Three-quarter key, cool fill from the opposite side, warm rim from behind.
-    // A single overhead light is the default "3D viewer" look and it flattens
-    // every chamfer on the receiver, which is exactly what the player is here to
-    // look at.
-    this.key = new THREE.DirectionalLight(0xfff2e0, 2.7);
+    /**
+     * THE STUDIO — three directional lights and an ambient term, and the count
+     * is load-bearing rather than aesthetic.
+     *
+     * three.js folds the number of lights OF EACH PUNCTUAL TYPE into the shader
+     * program cache key. This scene borrows the weapon material bank on purpose,
+     * so that the gun on the board is shaded by exactly the materials that will be
+     * in the player's hands — which means every light added here mints a fresh
+     * program permutation for ~20 materials, and those programs compile on the
+     * frame the board opens. That is a multi-second stall in the middle of the
+     * game: the reported "ухожу на доску, и назад выйти не могу". So the gate in
+     * tools/verify-gunsmith.mjs pins this at three directional and zero punctual,
+     * and brightness has to come from intensity rather than from more lamps.
+     *
+     * AmbientLight is the exception and the reason it is used here: it is a single
+     * `ambientLightColor` uniform that every lit program already carries, so it is
+     * free. A HemisphereLight would NOT be — it adds `numHemiLights` to the key.
+     *
+     * The intensities are 3-4x what they were, which is a bug fix and not a taste
+     * change. Every material in the weapon bank is calibrated about ten times
+     * under physical albedo, deliberately, because the VIEWMODEL light rig
+     * delivers roughly twenty times the world's irradiance per unit albedo (see
+     * the long note on `glove` in weapons/materials.js). This preview lit those
+     * crushed materials with three ordinary lamps at 2.7/0.8/1.5 and the result
+     * was measured on screen: an М416 whose receiver sat at luminance 20-30
+     * against a 0x0b0e13 backdrop at 14. The weapon was drawn correctly and was
+     * simply too dark to see, which is the whole of "оружие на доске не
+     * отображается".
+     *
+     * `fill` is also re-aimed much further toward the camera. The classic
+     * three-point rig leaves everything facing the viewer squarely — the receiver
+     * flat, the magazine's outer face, every rollmark — lit only at grazing
+     * incidence, and that is precisely where the detail the player came to look
+     * at lives.
+     */
+    this.key = new THREE.DirectionalLight(0xfff2e0, 10.5);
     this.key.position.set(0.62, 0.78, 0.72);
-    this.fill = new THREE.DirectionalLight(0x9dbfe8, 0.8);
-    this.fill.position.set(-0.85, 0.12, 0.46);
-    this.rim = new THREE.DirectionalLight(0xffd7a8, 1.5);
+    this.fill = new THREE.DirectionalLight(0xbcd6f2, 5.6);
+    this.fill.position.set(-0.62, 0.16, 0.88);
+    this.rim = new THREE.DirectionalLight(0xffd7a8, 5.8);
     this.rim.position.set(-0.34, 0.42, -0.95);
     for (const l of [this.key, this.fill, this.rim]) {
       l.castShadow = false;
       this.scene.add(l);
     }
+    /**
+     * Fills the downward-facing surfaces — the magazine floor plate, the trigger
+     * guard's underside, the whole belly of the weapon — which a directional-only
+     * rig leaves at absolute zero, where they read as a hole cut in the gun
+     * rather than as shadow.
+     */
+    this.ambient = new THREE.AmbientLight(0x8ea6bd, 1.15);
+    this.scene.add(this.ambient);
 
     /** weaponId -> { model, node, rig } */
     this.built = new Map();
@@ -205,6 +244,57 @@ export class BenchPreview {
     );
   }
 
+  /* --------------------------------------------------------------- prewarm */
+
+  /**
+   * Compile this scene's programs before the player ever opens the board.
+   *
+   * WHY IT IS NEEDED. three.js compiles a program the first time a given
+   * (material, light counts, shadow, fog, ...) permutation is actually drawn. The
+   * weapon materials are drawn during play under the WORLD's lighting — a CSM
+   * directional plus however many point lights are visible — and here under three
+   * directional lights and no punctual lights at all. Different key, different
+   * program. So every material on the weapon compiled on the frame the board
+   * opened, which on a mid-range laptop is 15-25 programs on one frame and
+   * hundreds of milliseconds to seconds of frozen screen.
+   *
+   * That is the mechanism behind "ухожу на доску, и назад выйти не могу. Игра
+   * зависает": nothing was deadlocked, the main thread was inside the GL driver
+   * compiling shaders, twice — once opening and once returning. The pause menu is
+   * plain DOM and never had the problem, which is exactly why the board did.
+   *
+   * ONE weapon is enough. All nine share the same material bank, and the
+   * permutation key does not include geometry.
+   *
+   * Called from `ShellSystem.prewarmMaterials()`, which core/prewarm.js discovers
+   * by duck typing, so this runs behind the loading bar with the other ~120
+   * programs instead of in the middle of a firefight.
+   */
+  async prewarm(def) {
+    if (this.disposed || !def) return { ok: false, reason: 'disposed' };
+    const r = this.renderer;
+    const before = r.info.programs?.length ?? 0;
+    this.setWeapon(def);
+    // The canvas variant is the right one: render() draws with the default
+    // framebuffer bound, and three folds output colour space and tone mapping —
+    // both read off the bound target — into the cache key.
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(null);
+    try {
+      await r.compileAsync(this.scene, this.camera);
+    } catch {
+      try {
+        r.compile(this.scene, this.camera);
+      } catch {
+        /* a driver without parallel compile and without compile(): nothing left
+           to try, and a failed prewarm must never block boot. */
+      }
+    } finally {
+      r.setRenderTarget(prev);
+    }
+    return { ok: true, compiled: (r.info.programs?.length ?? 0) - before };
+  }
+
   /* ------------------------------------------------------------------ input */
 
   beginDrag() {
@@ -298,7 +388,7 @@ export class BenchPreview {
     }
     this.built.clear();
     this.current = null;
-    for (const l of [this.key, this.fill, this.rim]) l.parent?.remove(l);
+    for (const l of [this.key, this.fill, this.rim, this.ambient]) l.parent?.remove(l);
     this.scene.remove(this.spin);
     this.disposed = true;
   }

@@ -28,6 +28,7 @@ import {
 } from '../../weapons/parts.js';
 import { specFor, nodesOf, layoutOf, validateSpec, MOVING_PARTS } from './specs.js';
 import { addSpecDetail, LOD_FULL } from './detail.js';
+import { addSignature } from './signature.js';
 
 /**
  * ARSENAL — the model builder.
@@ -64,13 +65,33 @@ const M = {
   soot: 'steel_soot',
   cavity: 'cavity',
   poly: 'polymer',
+  polyTan: 'polymer_tan',
   rubber: 'rubber',
   brass: 'brass',
+  wood: 'wood',
+  woodDark: 'wood_dark',
 };
 
-/** Furniture material for a spec: wood-furniture guns read warm, not black. */
+/**
+ * Furniture material for a spec.
+ *
+ * This function used to map `woodFurniture` onto `M.rubber`, i.e. onto the
+ * DARKEST material in the bank — a near-black overmould at 0.0049 linear. An
+ * АКМ's wood therefore rendered as exactly the same black as an M416's polymer,
+ * which threw away one of the two loudest identity cues a Kalashnikov has. The
+ * comment above it even said "wood-furniture guns read warm, not black", which
+ * is what the code was preventing.
+ *
+ * There are real wood materials now (weapons/materials.js), so the mapping says
+ * what it means. The SVD and the M870 take the darker, redder timber so a
+ * Dragunov beside a Kalashnikov is two different pieces of wood rather than two
+ * copies of one prop.
+ */
 function furnitureMat(spec) {
-  return spec.features.includes('woodFurniture') ? M.rubber : M.poly;
+  if (spec.features.includes('woodFurniture')) {
+    return spec.pattern === 'dmr' || spec.pattern === 'pump' ? M.woodDark : M.wood;
+  }
+  return M.poly;
 }
 
 /* ------------------------------------------------------------------ receiver */
@@ -89,6 +110,15 @@ function buildReceiver(body, spec) {
     // bounding sphere for the whole merged body. Same value the handguard rail
     // below is placed with, so the two are guaranteed coplanar.
     railTop: L.railTop,
+    /**
+     * A stamped Kalashnikov receiver has NO flat top. It has a hinged dust cover,
+     * which is why AK optics mount on a side rail — and which the block below
+     * builds. Leaving the shared builder to machine a Picatinny deck as well put
+     * a nine-slot rail underneath that dust cover: two mutually exclusive
+     * receiver tops in the same 20 mm, with the brighter one winning the frame.
+     * That rail was one of the reasons the АКМ read as an AR wearing wood.
+     */
+    rail: !(spec.pattern === 'ak' || spec.pattern === 'dmr'),
   });
 
   addLowerReceiver(body, M.alu, M.steel, {
@@ -292,6 +322,28 @@ function buildHandguardGroup(body, spec) {
 
 /* -------------------------------------------------------- grip and shoulder */
 
+/**
+ * Magazine material.
+ *
+ * NOT the furniture material, which is what it used to be — that put a WOODEN
+ * magazine on the АКМ the moment wood became a real material. Real magazines are
+ * their own thing, and the differences are large and free:
+ *
+ *   АКМ      ribbed steel        cold and specular against warm wood
+ *   АК-74    plum polymer        the single most recognisable colour in the roster
+ *   M416     black polymer       matte, matches the receiver
+ *   СВД/MP5  steel
+ *
+ * Three of the nine weapons therefore have a magazine of a visibly different
+ * substance, which is one more free identity cue per weapon than a shared
+ * `furnitureMat` could ever give.
+ */
+function magazineMat(spec) {
+  if (spec.id === 'ak74') return M.polyTan;
+  if (spec.id === 'akm' || spec.id === 'svd' || spec.id === 'mp5') return M.steel;
+  return M.poly;
+}
+
 function buildGripAndStock(body, spec) {
   addPistolGrip(body, furnitureMat(spec), M.rubber, {
     len: spec.pattern === 'pistol' ? 0.116 : 0.108,
@@ -302,53 +354,107 @@ function buildGripAndStock(body, spec) {
   });
 
   if (spec.stockRear === null) return;
+  const len = spec.stockRear - spec.zUpperRear;
 
   if (spec.features.includes('thumbholeStock')) {
-    // SVD: a skeletonised thumbhole stock with a cheek rest, not a tube.
-    const frameOuter = extrude(roundRect(0.026, 0.086, 0.012, 6), 0.0, { bevel: 0 });
-    frameOuter.dispose();
-    const rails = [
-      { y: spec.bore - 0.006, h: 0.014 },
-      { y: spec.bore - 0.062, h: 0.016 },
-    ];
-    for (const r of rails) {
-      const bar = box(0.026, r.h, spec.stockRear - spec.zUpperRear - 0.01, 0.0022, 2);
-      body.add(bar, M.rubber, { y: r.y, z: (spec.stockRear + spec.zUpperRear) / 2 });
-      bar.dispose();
-    }
-    const butt = box(0.028, 0.09, 0.024, 0.0035, 2);
-    body.add(butt, M.rubber, { y: spec.bore - 0.03, z: spec.stockRear - 0.012 });
+    /**
+     * СВД: a skeletonised thumbhole stock.
+     *
+     * The previous version built two horizontal bars and a 90 mm butt block out
+     * of `rubber`, which is to say: a black slab with a slot in it. What makes a
+     * Dragunov stock recognisable is that it is a FRAME — the thumbhole is a hole
+     * you can see the world through, the comb rises to meet the cheek, and the
+     * whole thing is warm timber. So it is built as a closed loop of four
+     * members with real daylight in the middle.
+     */
+    const zMid = (spec.stockRear + spec.zUpperRear) / 2;
+    // Upper member: wrist to comb, rising toward the rear.
+    const upper = box(0.026, 0.019, len * 0.96, 0.0026, 2);
+    body.add(upper, M.woodDark, { y: spec.bore - 0.004, z: zMid, rx: -0.05 });
+    upper.dispose();
+    // Lower member: the pistol-grip strap under the thumbhole.
+    const lower = box(0.024, 0.017, len * 0.74, 0.0026, 2);
+    body.add(lower, M.woodDark, { y: spec.bore - 0.062, z: zMid + len * 0.1, rx: 0.06 });
+    lower.dispose();
+    // Rear post closing the loop.
+    const post = box(0.026, 0.062, 0.021, 0.003, 2);
+    body.add(post, M.woodDark, { y: spec.bore - 0.032, z: spec.stockRear - 0.026 });
+    post.dispose();
+    // Front post: the back of the pistol grip, which is what the thumb wraps.
+    const front = box(0.024, 0.05, 0.019, 0.003, 2);
+    body.add(front, M.woodDark, { y: spec.bore - 0.034, z: spec.zUpperRear + 0.024 });
+    front.dispose();
+    // Butt plate and its pad.
+    const butt = box(0.028, 0.086, 0.014, 0.0035, 2);
+    body.add(butt, M.woodDark, { y: spec.bore - 0.026, z: spec.stockRear - 0.006 });
     butt.dispose();
-    const pad = box(0.03, 0.092, 0.016, 0.004, 2);
-    body.add(pad, M.rubber, { y: spec.bore - 0.03, z: spec.stockRear + 0.006 });
+    const pad = box(0.03, 0.088, 0.011, 0.004, 2);
+    body.add(pad, M.rubber, { y: spec.bore - 0.026, z: spec.stockRear + 0.005 });
     pad.dispose();
     if (spec.features.includes('cheekRest')) {
-      const cheek = blob(0.03, 0.03, 0.09, 0.008, 3);
-      body.add(cheek, M.rubber, { y: spec.bore + 0.026, z: spec.stockRear - 0.07 });
+      // The detachable cheek piece: a wedge clamped to the upper member.
+      const cheek = blob(0.028, 0.026, 0.082, 0.007, 3);
+      body.add(cheek, M.woodDark, { y: spec.bore + 0.018, z: spec.stockRear - 0.062, rx: -0.06 });
       cheek.dispose();
+      const strap = box(0.03, 0.005, 0.012, 0.0009, 1);
+      body.add(strap, M.bright, { y: spec.bore + 0.004, z: spec.stockRear - 0.096 });
+      strap.dispose();
     }
     return;
   }
 
   if (spec.features.includes('fixedStock')) {
-    // AK: a solid one-piece stock with a straight comb.
-    const comb = box(0.03, 0.058, spec.stockRear - spec.zUpperRear, 0.004, 2);
-    body.add(comb, furnitureMat(spec), {
-      y: spec.bore - 0.022,
-      z: (spec.stockRear + spec.zUpperRear) / 2,
-      rx: -0.035,
-    });
-    comb.dispose();
-    const pad = box(0.032, 0.088, 0.014, 0.0035, 2);
-    body.add(pad, M.rubber, { y: spec.bore - 0.036, z: spec.stockRear + 0.005 });
-    pad.dispose();
+    /**
+     * AK: a one-piece wooden stock, and the shape is the whole point.
+     *
+     * The old version was `box(0.03, 0.058, len)` plus an 88 MM TALL butt pad,
+     * which in profile is a rectangle with a taller rectangle stuck on the end —
+     * measured on screen as a featureless slab occupying a quarter of the
+     * weapon. A real AK stock TAPERS: it leaves the receiver deep, thins toward
+     * the middle, and flares again at the toe, with the comb sloping down about
+     * 5 degrees and the butt raked back. That silhouette is the reason a
+     * Kalashnikov reads as a wedge and an AR reads as a tube.
+     *
+     * Built from three tapering segments plus the plate, because a single box
+     * cannot taper and the taper is the identity.
+     */
+    const segs = 3;
+    for (let i = 0; i < segs; i++) {
+      const t = (i + 0.5) / segs;
+      // Deep at the receiver (58 mm), waisted at 0.55, flaring to 66 mm at the toe.
+      const h = 0.058 * (1 - t * 0.34) + 0.028 * t * t;
+      const w = 0.031 * (1 - t * 0.1);
+      const seg = box(w, h, (len / segs) * 1.06, 0.0035, 2);
+      body.add(seg, furnitureMat(spec), {
+        y: spec.bore - 0.022 - t * 0.014,
+        z: spec.zUpperRear + len * ((i + 0.5) / segs),
+        rx: -0.06,
+      });
+      seg.dispose();
+    }
+    // Sling slot through the stock: a real hole near the wrist, which is what
+    // stops the taper reading as a solid wedge of nothing.
+    const slot = box(0.034, 0.012, 0.026, 0.001, 1);
+    body.add(slot, M.cavity, { y: spec.bore - 0.038, z: spec.zUpperRear + len * 0.3 });
+    slot.dispose();
+    // Steel butt plate with the trap door, not a rubber brick.
+    const plate = box(0.032, 0.062, 0.008, 0.0022, 2);
+    body.add(plate, M.steel, { y: spec.bore - 0.044, z: spec.stockRear - 0.002, rx: -0.06 });
+    plate.dispose();
+    const trap = box(0.02, 0.026, 0.003, 0.0007, 1);
+    body.add(trap, M.soot, { y: spec.bore - 0.05, z: spec.stockRear + 0.003 });
+    trap.dispose();
     return;
   }
 
-  // A collapsing wire stock is its own mechanism, built in detail.js. Letting
-  // addCarbineStock run as well put an AR receiver extension inside the MP5's
-  // slide tubes — two stocks occupying the same 170 mm.
-  if (!spec.features.includes('collapsingStock')) {
+  /**
+   * A collapsing wire stock (MP5) is its own mechanism in detail.js, and an AR
+   * buffer tube plus sliding collar is its own mechanism in signature.js. Either
+   * one plus `addCarbineStock` would be two stocks occupying the same 170 mm.
+   */
+  const ownStock =
+    spec.features.includes('collapsingStock') || spec.features.includes('bufferTube');
+  if (!ownStock) {
     addCarbineStock(body, M.alu, furnitureMat(spec), M.rubber, {
       bore: spec.bore,
       zRear: spec.stockRear,
@@ -455,13 +561,13 @@ function buildAccessories(body, spec) {
 function buildMovingParts(spec) {
   const magazine = new Assembly(`${spec.id}-magazine`);
   if (spec.mag.len > 0) {
-    buildMagazine(magazine, { poly: furnitureMat(spec), steel: M.steel, brass: M.brass }, {
+    buildMagazine(magazine, { poly: magazineMat(spec), steel: M.steel, brass: M.brass }, {
       w: spec.mag.w,
       d: spec.mag.d,
       len: spec.mag.len,
       curve: spec.mag.curve,
       segs: spec.mag.segs,
-      poly: furnitureMat(spec),
+      poly: magazineMat(spec),
     });
   }
 
@@ -510,22 +616,45 @@ function buildMovingParts(spec) {
 
 /* ---------------------------------------------------------------- the optic */
 
+/**
+ * NOTHING IS WELDED TO THE RECEIVER ANY MORE.
+ *
+ * This function used to build a 52 mm optic tube (196 mm on the СВД) into the
+ * weapon BODY, unconditionally, for every long gun. The consequences were both
+ * visible on the gunsmith board:
+ *
+ *   1. every rifle wore a can floating above its rail even with `optic: 'iron'`
+ *      selected — which is the default loadout, so this was the normal state;
+ *   2. mounting a real optic from the hardware rig put a SECOND sight on top of
+ *      the first, and taking one off left the welded one behind. "Ставлю модуль,
+ *      а на доске не отображается" is partly this: the change was invisible
+ *      because there was already a scope there.
+ *
+ * Optics are attachments. They come from `HardwareRig`, they mount and unmount,
+ * and the body carries only what a real weapon carries with the optic removed:
+ * iron sights, and on a pistol the mounting cut.
+ *
+ * The one thing that was genuinely load-bearing about the welded optic is that
+ * `nodes.opticGlass` fed the viewmodel's collimated reticle. That is now supplied
+ * dynamically by the mounted unit — see `opticGlass()` on the rig and
+ * `viewmodel.opticProvider` — which is strictly better: the reticle is now the
+ * reticle of the sight you actually mounted, at its real aperture.
+ */
 function buildDefaultOptic(body, spec) {
   const L = layoutOf(spec);
   if (spec.features.includes('miniReflexMount')) {
-    return buildMiniReflex(body, { y: L.opticY, z: spec.opticZ, matBody: M.alu });
+    // The optics CUT on a pistol slide: two lugs and a recoil shoulder. A real
+    // slide keeps these whether or not anything is bolted to them.
+    const plate = box(spec.slide.w * 0.86, 0.0026, 0.0242, 0.0006, 1);
+    body.add(plate, M.soot, { y: L.railTop + 0.001, z: spec.opticZ });
+    plate.dispose();
+    for (const sx of [-1, 1]) {
+      const lug = box(0.0026, 0.0034, 0.0042, 0.0004, 1);
+      body.add(lug, M.bright, { x: sx * spec.slide.w * 0.3, y: L.railTop + 0.003, z: spec.opticZ - 0.008 });
+      lug.dispose();
+    }
   }
-  if (spec.features.includes('beadSight')) return null;
-  return buildOptic(body, {
-    rTube: 0.0155,
-    len: spec.pattern === 'dmr' ? 0.196 : 0.052,
-    hood: 0.007,
-    y: L.opticY,
-    z: spec.opticZ,
-    railTop: L.railTop,
-    matBody: M.alu,
-    matSteel: M.steel,
-  });
+  return null;
 }
 
 /* ----------------------------------------------------------------- assemble */
@@ -555,6 +684,14 @@ export function buildArsenalModel(id, opts = {}) {
   // serrations, M-LOK cutouts, the Deagle's squared barrel. See detail.js for
   // why these were declared in specs.js long before anything built them.
   addSpecDetail(body, spec, M, opts.lod ?? LOD_FULL);
+  /**
+   * The signature pass. Runs AFTER the detail pass and before the optic, because
+   * it is allowed to put geometry where the generic architecture left a hole —
+   * an AK's front sight tower stands where an AR has nothing at all — and
+   * because the optic's own mount must be able to land on top of whatever the
+   * family put on the receiver.
+   */
+  addSignature(body, spec, M);
   const optic = buildDefaultOptic(body, spec);
   const moving = buildMovingParts(spec);
 

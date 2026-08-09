@@ -1002,7 +1002,18 @@ export class Viewmodel {
    * an angle.
    */
   _updateReticle(w, ads) {
-    const optic = w.optic;
+    /**
+     * `opticProvider` is injected by the arsenal (arsenal/index.js) and returns
+     * the glass of the sight actually mounted on the weapon in hand, or null for
+     * irons. It takes precedence over `w.optic` — the glass baked into the model
+     * — because a mountable sight that cannot change the reticle is not mounted
+     * in any sense the player can see.
+     *
+     * The fallback keeps the three base guns in weapons/models/*.js working
+     * unchanged: they still carry their own glass, and without `arsenal`
+     * registered there is no provider to consult.
+     */
+    const optic = this.opticProvider?.() ?? w.optic;
     if (!optic) {
       this.reticle.visible = false;
       return;

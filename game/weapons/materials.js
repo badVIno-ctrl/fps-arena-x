@@ -540,6 +540,85 @@ export const WEAPON_MATERIALS = {
     },
   ],
 
+  /**
+   * ARSENAL WOOD — laminated birch furniture (AKM, SVD, M870).
+   *
+   * This material exists because `furnitureMat()` in the model builder used to
+   * map `woodFurniture` onto `rubber`, i.e. onto the DARKEST material on the
+   * weapon (0.0049 linear, deliberately near-black overmould). An AKM's wood
+   * therefore rendered as the same black as an M416's polymer, and one of the
+   * two loudest identity cues a Kalashnikov has — warm wood against blued steel
+   * — was simply absent. That, more than any missing rivet, is why the two
+   * rifles read as the same weapon.
+   *
+   * The surface shader is the world's `wood` (game/materials/library.js), which
+   * already produces grain, so nothing new is invented here: it is remapped from
+   * architectural scale to weapon scale and put through the viewmodel's exposure
+   * calibration like every other material on the gun.
+   *
+   * EXPOSURE. The whole bank sits about ten times under physical albedo because
+   * the viewmodel light rig delivers roughly 20x the world's irradiance per unit
+   * albedo (see the long note on `glove`). Shellacked birch is a ~0.19 albedo
+   * reddish brown, so the tint is chosen to land at ~0.021/0.012/0.0065 linear:
+   * a little BRIGHTER than the polymer at 0.0075 and, critically, at a 3.2:1
+   * red-over-blue ratio where every other material on the weapon is between
+   * 0.9:1 and 1.5:1. Hue, not value, is what carries the read at 1080p — the
+   * same argument that separates the glove from the receiver.
+   *
+   * `scale: 0.09` puts roughly one growth-ring period across a handguard rather
+   * than across a wall, which is what stops it looking like planking.
+   */
+  wood: [
+    'wood',
+    {
+      ...BASE,
+      bake: { size: 512, seed: 71, relief: 0.004, tintA: 0x6b4526, tintB: 0x3a2314 },
+      scale: 0.09,
+      // Darkened after the first render: 0.395 read as raw pine plank in the
+      // board's studio, brighter than the anodised receiver it is bolted to,
+      // which is backwards — shellacked birch is a DARK warm brown that catches
+      // a highlight, not a light one. Ratio held at ~3.1:1 red over blue, which
+      // is what carries the hue separation from the cool alloy.
+      tint: c(0.255, 0.176, 0.118),
+      // Hand-oiled birch: satin, not gloss, and noticeably smoother than the
+      // moulded nylon it has to be told apart from.
+      roughness: [0.52, 0.2, 0.34],
+      normalStrength: 1.15,
+      detail: [18, 0.85, 0.4, 7],
+      // Wood wears at the EDGES and where the hand sits, and it wears LIGHTER
+      // (bare fibre under the finish) where alloy wears brighter.
+      wear: [0.34, 0.72, 0.55, 0],
+      wearColor: 0xa8794a,
+      wearMaterial: [0.42, 0.0, 0, 0.6],
+      grimeColor: 0x140d07,
+      three: { physical: true, specularIntensity: 0.16, clearcoat: 0.22, clearcoatRoughness: 0.5 },
+    },
+  ],
+
+  /**
+   * The darker, redder wood used on an SVD's thumbhole stock and an M870's
+   * furniture. Same surface, same calibration, one stop down and further into
+   * the red — a genuinely different piece of timber rather than a tint slider,
+   * so a Dragunov beside a Kalashnikov does not read as two copies of one prop.
+   */
+  wood_dark: [
+    'wood',
+    {
+      ...BASE,
+      bake: { size: 512, seed: 137, relief: 0.0045, tintA: 0x4e2c17, tintB: 0x26150c },
+      scale: 0.075,
+      tint: c(0.196, 0.126, 0.082),
+      roughness: [0.46, 0.22, 0.36],
+      normalStrength: 1.2,
+      detail: [20, 0.9, 0.42, 7],
+      wear: [0.3, 0.74, 0.55, 0],
+      wearColor: 0x8f6238,
+      wearMaterial: [0.4, 0.0, 0, 0.6],
+      grimeColor: 0x120a05,
+      three: { physical: true, specularIntensity: 0.17, clearcoat: 0.3, clearcoatRoughness: 0.42 },
+    },
+  ],
+
   /** Soft rubber: grip overmould, butt pad, eyecup. */
   rubber: [
     'rubber',

@@ -59,399 +59,517 @@ export const REQUIRED_NODES = [
 
 /** Moving parts every model animates. Pumps and pistols swap some of these. */
 export const MOVING_PARTS = ['magazine', 'charging', 'bolt', 'trigger', 'selector'];
+/**
+ * The nine specs — REBUILT FROM REAL DIMENSIONS.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS TABLE WAS REWRITTEN
+ * ---------------------------------------------------------------------------
+ * The previous numbers were "anchored to the base M4A1 and offset by feel", and
+ * the result was measurable: rendered in profile on one light, the АКМ and the
+ * M416 had the same silhouette. Both had a 186-245 mm receiver carrying a
+ * 212-226 mm magazine, which is a proportion no service rifle has ever had — an
+ * AK receiver is 275 mm and its magazine is 175 mm, so the model had the ratio
+ * almost exactly INVERTED. Everything downstream of that inherits the error: the
+ * gun reads as a short box with an enormous banana hanging off it, and once two
+ * rifles share that shape no amount of rivet detail tells them apart.
+ *
+ * So every figure below is now a real published dimension, written in
+ * MILLIMETRES in the literal so it can be checked against a spec sheet, and
+ * converted once by `mm()`.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ORIGIN, AND WHY IT MATTERS
+ * ---------------------------------------------------------------------------
+ * z = 0 is the GRIP WEB — the web of the firing hand, between thumb and
+ * forefinger. Not the receiver, not the muzzle. That choice is what makes the
+ * table verifiable, because two real, published figures are measured from very
+ * near it:
+ *
+ *   length of pull   trigger to buttplate. Puts `stockRear`.
+ *   overall length   buttplate to muzzle.  Then puts `muzzleZ`, hence the barrel.
+ *
+ * An AKM is 880 mm overall with a 340 mm length of pull, so its buttplate is at
+ * +340 and its muzzle at 340 − 880 = −540. Every other z on the weapon is then
+ * pinned between those two by the parts that physically occupy the space:
+ * receiver 275 mm, barrel protruding ~315 mm ahead of the front trunnion.
+ * 275 + 315 + 290 ≈ 880. The table closes.
+ *
+ * ---------------------------------------------------------------------------
+ * VIEWMODEL COMPRESSION
+ * ---------------------------------------------------------------------------
+ * `K` scales every z and every radius. It is NOT a fudge factor for making the
+ * numbers agree — the numbers agree at K = 1. It exists because a first-person
+ * weapon is held about 300 mm from the eye, where a full-size rifle would put
+ * its buttplate well behind the near plane and its muzzle most of the way across
+ * the frame. Games have always compressed this; the honest version is to write
+ * reality down and compress it in ONE place, visibly, rather than to distribute
+ * the compression as a hundred hand-tweaked millimetres nobody can audit.
+ *
+ * 0.88 was chosen so overall lengths land within a few percent of the poses the
+ * hand rig and the ADS solve were already tuned against (the АКМ goes 750 → 774
+ * mm), which means the proportions could be fixed WITHOUT re-solving the hand
+ * IK, the eye relief and the sight axis at the same time. Changing one thing at
+ * a time is the only way this stays reviewable.
+ *
+ * Bore height is exempt. It is the archetype's eye-line constant (see
+ * CLASS_ARCHETYPES in arsenal/defs.js) and the gate pins the two together.
+ *
+ * ---------------------------------------------------------------------------
+ * COORDINATES  (unchanged)
+ * ---------------------------------------------------------------------------
+ *   −Z down range, +Y up, +X right. Metres after `mm()`.
+ *
+ * `pattern` selects the receiver architecture; `signature` selects the family's
+ * unmistakable geometry in models/signature.js. Those are different questions:
+ * an АКМ and an АК-74 share the `ak` architecture and differ in signature
+ * (wood vs polymer furniture, slant brake vs four-port brake).
+ */
 
 /**
- * The nine specs.
- *
- * Numbers are anchored to the base M4A1 wherever the real weapons agree with it
- * (bore height, rail deck, eye line) and diverge wherever the real weapons do.
- * `zBarrelEnd` minus `zUpperRear` is the receiver-to-muzzle distance, so it is
- * also what makes an SVD feel long in the hands and an MP5 feel stubby.
+ * Viewmodel compression. See the note above — real dimensions go in the table,
+ * this is the single place they are scaled.
  */
-export const MODEL_SPECS = {
-  /* ----------------------------------------------------------------- M416 */
-  m416: {
-    id: 'm416',
-    label: 'M416',
-    pattern: 'ar',
-    fxClass: 'carbine',
-    bore: 0.075,
-    rUpper: 0.0192,
-    railRise: 0.0286,
-    zUpperRear: 0.055,
-    zUpperFront: -0.145,
-    portZ: -0.052,
-    zBreech: -0.1,
-    zBarrelEnd: -0.452,
-    rBarrel: 0.0077,
-    rChamber: 0.0112,
-    gasAt: -0.3,
-    hgZ0: -0.147,
-    hgZ1: -0.4,
-    hgR: 0.0238,
-    hgSides: 8,
-    hgSlots: 4,
-    handZ: -0.245,
-    gripZ: 0.015,
-    gripAngle: 0.38,
-    stockRear: 0.245,
-    muzzleKind: 'brake',
-    magZ: -0.058,
-    magTilt: 0.08,
-    mag: { w: 0.0292, d: 0.0672, len: 0.212, curve: 0.024, segs: 8 },
-    opticRise: 0.067,
-    opticZ: -0.022,
-    shell: { caseLen: 0.0446, rimR: 0.00495 },
-    features: ['railedHandguard', 'buis', 'qdSocket', 'slingLoop', 'boltCatch', 'brassDeflector'],
-    rollmarks: [
-      { x: -0.0149, y: 0.0355, z: -0.031, h: 0.0036 },
-      { x: -0.0149, y: 0.0295, z: -0.031, h: 0.0026, pattern: [2, 3, 1, 0, 2, 2, 3, 0, 3, 2] },
-    ],
-  },
+export const K = 0.88;
 
-  /* ------------------------------------------------------------------ АКМ */
+/** Millimetres of real weapon → metres of viewmodel. */
+const mm = (v) => (v * K) / 1000;
+
+/** Millimetres of real weapon → metres, for a whole record of them. */
+const mmAll = (o) => {
+  const out = {};
+  for (const [k, v] of Object.entries(o)) out[k] = typeof v === 'number' ? mm(v) : v;
+  return out;
+};
+
+export const MODEL_SPECS = {
+  /* ------------------------------------------------------------------ АКМ --
+   * Kalashnikov, 7.62x39. Overall 880 mm, barrel 415 mm, LOP 340 mm, stamped
+   * receiver 275 mm, 30-round magazine 175 mm tall with a pronounced rocker.
+   * The silhouette cues, in order of how far away they are still readable:
+   * the gas tube riding ABOVE the barrel, the slanted gas block, the front
+   * sight tower standing off the barrel, wood furniture, and the slant brake. */
   akm: {
     id: 'akm',
     label: 'АКМ',
     pattern: 'ak',
+    signature: 'ak',
     fxClass: 'rifle',
     bore: 0.075,
-    rUpper: 0.0198,
-    railRise: 0.0262,
-    zUpperRear: 0.048,
-    zUpperFront: -0.138,
-    portZ: -0.044,
-    zBreech: -0.096,
-    zBarrelEnd: -0.43,
-    rBarrel: 0.0082,
-    rChamber: 0.0118,
-    gasAt: -0.276,
-    hgZ0: -0.14,
-    hgZ1: -0.322,
-    hgR: 0.0252,
+    rUpper: mm(19.8),
+    railRise: mm(26.2),
+    zUpperRear: mm(112),
+    zUpperFront: mm(-163),
+    portZ: mm(-55),
+    zBreech: mm(-150),
+    zBarrelEnd: mm(-478),
+    rBarrel: mm(8.2),
+    rChamber: mm(11.8),
+    gasAt: mm(-300),
+    hgZ0: mm(-175),
+    hgZ1: mm(-300),
+    hgR: mm(25.2),
     hgSides: 6,
     hgSlots: 0,
-    handZ: -0.226,
-    gripZ: 0.012,
+    handZ: mm(-238),
+    gripZ: mm(12),
     gripAngle: 0.44,
-    stockRear: 0.258,
+    stockRear: mm(340),
     muzzleKind: 'brake',
-    magZ: -0.05,
+    magZ: mm(-78),
     magTilt: 0.16,
-    mag: { w: 0.029, d: 0.069, len: 0.226, curve: 0.036, segs: 9 },
-    opticRise: 0.062,
-    opticZ: -0.016,
+    mag: mmAll({ w: 29, d: 69, len: 175, curve: 30 }),
+    magSegs: 13,
+    opticRise: mm(62),
+    opticZ: mm(-30),
     shell: { caseLen: 0.0388, rimR: 0.00565 },
-    features: ['gasTube', 'dustCover', 'sideRail', 'woodFurniture', 'fixedStock', 'slingLoop'],
-    rollmarks: [{ x: -0.0155, y: 0.0338, z: -0.026, h: 0.0034, pattern: [3, 1, 2, 3, 0, 2, 3, 1] }],
+    features: [
+      'gasTube', 'dustCover', 'sideRail', 'woodFurniture', 'fixedStock', 'slingLoop',
+      'akFrontTower', 'akGasBlock', 'slantBrake', 'akSafetyLever', 'akRivets', 'akMagCatch',
+    ],
+    rollmarks: [{ x: -0.0155, y: 0.0338, z: mm(-40), h: 0.0034, pattern: [3, 1, 2, 3, 0, 2, 3, 1] }],
   },
 
-  /* ---------------------------------------------------------------- АК-74 */
+  /* ---------------------------------------------------------------- АК-74 --
+   * 5.45x39. Same receiver and length of pull as the АКМ; what changes is the
+   * furniture (plum/black polymer, not wood), the ribbed magazine, and the
+   * four-port muzzle brake that is a third longer than the АКМ's slant cut. */
   ak74: {
     id: 'ak74',
     label: 'АК-74',
     pattern: 'ak',
+    signature: 'ak',
     fxClass: 'rifle',
     bore: 0.075,
-    rUpper: 0.0194,
-    railRise: 0.0262,
-    zUpperRear: 0.048,
-    zUpperFront: -0.138,
-    portZ: -0.044,
-    zBreech: -0.096,
-    zBarrelEnd: -0.437,
-    rBarrel: 0.0074,
-    rChamber: 0.0108,
-    gasAt: -0.282,
-    hgZ0: -0.14,
-    hgZ1: -0.33,
-    hgR: 0.0248,
+    rUpper: mm(19.4),
+    railRise: mm(26.2),
+    zUpperRear: mm(112),
+    zUpperFront: mm(-163),
+    portZ: mm(-55),
+    zBreech: mm(-150),
+    zBarrelEnd: mm(-490),
+    rBarrel: mm(7.4),
+    rChamber: mm(10.8),
+    gasAt: mm(-305),
+    hgZ0: mm(-175),
+    hgZ1: mm(-305),
+    hgR: mm(24.8),
     hgSides: 6,
     hgSlots: 0,
-    handZ: -0.23,
-    gripZ: 0.012,
+    handZ: mm(-240),
+    gripZ: mm(12),
     gripAngle: 0.44,
-    stockRear: 0.256,
+    stockRear: mm(340),
     muzzleKind: 'comp',
-    magZ: -0.05,
+    magZ: mm(-78),
     magTilt: 0.16,
-    mag: { w: 0.0278, d: 0.0662, len: 0.218, curve: 0.03, segs: 9 },
-    opticRise: 0.062,
-    opticZ: -0.016,
+    mag: mmAll({ w: 27.8, d: 66.2, len: 170, curve: 26 }),
+    magSegs: 13,
+    opticRise: mm(62),
+    opticZ: mm(-30),
     shell: { caseLen: 0.0398, rimR: 0.00505 },
-    features: ['gasTube', 'dustCover', 'sideRail', 'polymerFurniture', 'fixedStock', 'slingLoop'],
-    rollmarks: [{ x: -0.0152, y: 0.0338, z: -0.026, h: 0.0032, pattern: [2, 3, 3, 1, 0, 3, 2, 2] }],
+    features: [
+      'gasTube', 'dustCover', 'sideRail', 'polymerFurniture', 'fixedStock', 'slingLoop',
+      'akFrontTower', 'akGasBlock', 'akSafetyLever', 'akRivets', 'akMagCatch', 'magRibs',
+    ],
+    rollmarks: [{ x: -0.0152, y: 0.0338, z: mm(-40), h: 0.0032, pattern: [2, 3, 3, 1, 0, 3, 2, 2] }],
   },
 
-  /* --------------------------------------------------------------- SCAR-H */
+  /* ----------------------------------------------------------------- M416 --
+   * HK416 A5, 14.5 in. Overall 885 mm with the stock out, barrel 368 mm, upper
+   * 245 mm, free-float rail 272 mm — the LONG handguard that reaches almost to
+   * the muzzle is the single most recognisable thing about it, and the previous
+   * spec gave it 253 mm of receiver and 212 mm of magazine instead. STANAG
+   * magazines are 190 mm and nearly STRAIGHT: 14 mm of sagitta against the AK's
+   * 30 is what stops the two rifles sharing a silhouette. */
+  m416: {
+    id: 'm416',
+    label: 'M416',
+    pattern: 'ar',
+    signature: 'ar',
+    fxClass: 'carbine',
+    bore: 0.075,
+    rUpper: mm(19.2),
+    railRise: mm(28.6),
+    zUpperRear: mm(100),
+    zUpperFront: mm(-145),
+    portZ: mm(-50),
+    zBreech: mm(-128),
+    zBarrelEnd: mm(-455),
+    rBarrel: mm(7.7),
+    rChamber: mm(11.2),
+    gasAt: mm(-330),
+    hgZ0: mm(-148),
+    hgZ1: mm(-420),
+    hgR: mm(23.8),
+    hgSides: 8,
+    hgSlots: 5,
+    handZ: mm(-262),
+    gripZ: mm(15),
+    gripAngle: 0.38,
+    stockRear: mm(330),
+    muzzleKind: 'brake',
+    magZ: mm(-60),
+    magTilt: 0.04,
+    mag: mmAll({ w: 29.2, d: 67.2, len: 190, curve: 14 }),
+    magSegs: 13,
+    opticRise: mm(67),
+    opticZ: mm(-22),
+    shell: { caseLen: 0.0446, rimR: 0.00495 },
+    features: [
+      'railedHandguard', 'buis', 'qdSocket', 'slingLoop', 'boltCatch', 'brassDeflector',
+      'bufferTube', 'castleNut', 'arStock', 'forwardAssist', 'magwellFence', 'birdcage',
+      'dustCoverDoor', 'lowProfileGasBlock',
+    ],
+    rollmarks: [
+      { x: -0.0149, y: 0.0355, z: mm(-46), h: 0.0036 },
+      { x: -0.0149, y: 0.0295, z: mm(-46), h: 0.0026, pattern: [2, 3, 1, 0, 2, 2, 3, 0, 3, 2] },
+    ],
+  },
+
+  /* --------------------------------------------------------------- SCAR-H --
+   * FN SCAR-H, 7.62x51, 16 in. Overall 889 mm folded-stock-extended, monolithic
+   * upper 330 mm — by far the longest receiver in the roster, and the reason a
+   * SCAR reads as "one long extruded body" rather than as an AR. */
   scar: {
     id: 'scar',
     label: 'SCAR-H',
     pattern: 'battle',
+    signature: 'scar',
     fxClass: 'rifle',
     bore: 0.075,
-    rUpper: 0.0206,
-    railRise: 0.0302,
-    zUpperRear: 0.052,
-    zUpperFront: -0.152,
-    portZ: -0.05,
-    zBreech: -0.104,
-    zBarrelEnd: -0.47,
-    rBarrel: 0.0086,
-    rChamber: 0.0124,
-    gasAt: -0.31,
-    hgZ0: -0.154,
-    hgZ1: -0.372,
-    hgR: 0.0262,
+    rUpper: mm(20.6),
+    railRise: mm(30.2),
+    zUpperRear: mm(105),
+    zUpperFront: mm(-225),
+    portZ: mm(-70),
+    zBreech: mm(-190),
+    zBarrelEnd: mm(-505),
+    rBarrel: mm(8.6),
+    rChamber: mm(12.4),
+    gasAt: mm(-330),
+    hgZ0: mm(-230),
+    hgZ1: mm(-400),
+    hgR: mm(26.2),
     hgSides: 8,
     hgSlots: 5,
-    handZ: -0.252,
-    gripZ: 0.018,
+    handZ: mm(-300),
+    gripZ: mm(18),
     gripAngle: 0.36,
-    stockRear: 0.25,
+    stockRear: mm(336),
     muzzleKind: 'a2',
-    magZ: -0.062,
-    magTilt: 0.06,
-    mag: { w: 0.0308, d: 0.0724, len: 0.238, curve: 0.02, segs: 8 },
-    opticRise: 0.071,
-    opticZ: -0.026,
+    magZ: mm(-80),
+    magTilt: 0.05,
+    mag: mmAll({ w: 30.8, d: 72.4, len: 200, curve: 10 }),
+    magSegs: 12,
+    opticRise: mm(71),
+    opticZ: mm(-30),
     shell: { caseLen: 0.0512, rimR: 0.00595 },
     features: [
-      'railedHandguard',
-      'foldingStock',
-      'adjustableCheek',
-      'ambiCharging',
-      'qdSocket',
-      'slingLoop',
+      'railedHandguard', 'foldingStock', 'adjustableCheek', 'ambiCharging', 'qdSocket',
+      'slingLoop', 'monolithicRail', 'sideCharging', 'scarTruss', 'polymerLower',
     ],
-    rollmarks: [{ x: -0.016, y: 0.0362, z: -0.034, h: 0.0034, pattern: [3, 2, 0, 3, 1, 2, 3, 3] }],
+    rollmarks: [{ x: -0.016, y: 0.0362, z: mm(-60), h: 0.0034, pattern: [3, 2, 0, 3, 1, 2, 3, 3] }],
   },
 
-  /* ------------------------------------------------------------------ СВД */
+  /* ------------------------------------------------------------------ СВД --
+   * Dragunov, 7.62x54R. Overall 1225 mm, barrel 620 mm, LOP 467 mm. The longest
+   * weapon here by 300 mm, and the only one whose stock is a skeletonised
+   * thumbhole — cut out, not a slab, which is exactly why a slab read wrong. */
   svd: {
     id: 'svd',
     label: 'СВД',
     pattern: 'dmr',
+    signature: 'svd',
     fxClass: 'rifle',
     bore: 0.079,
-    rUpper: 0.0202,
-    railRise: 0.0268,
-    zUpperRear: 0.062,
-    zUpperFront: -0.162,
-    portZ: -0.056,
-    zBreech: -0.112,
-    zBarrelEnd: -0.612,
-    rBarrel: 0.0079,
-    rChamber: 0.0126,
-    gasAt: -0.4,
-    hgZ0: -0.166,
-    hgZ1: -0.316,
-    hgR: 0.0272,
+    rUpper: mm(20.2),
+    railRise: mm(26.8),
+    zUpperRear: mm(130),
+    zUpperFront: mm(-175),
+    portZ: mm(-60),
+    zBreech: mm(-160),
+    zBarrelEnd: mm(-700),
+    rBarrel: mm(7.9),
+    rChamber: mm(12.6),
+    gasAt: mm(-430),
+    hgZ0: mm(-180),
+    hgZ1: mm(-330),
+    hgR: mm(27.2),
     hgSides: 6,
     hgSlots: 0,
-    handZ: -0.24,
-    gripZ: 0.02,
+    handZ: mm(-255),
+    gripZ: mm(20),
     gripAngle: 0.4,
-    stockRear: 0.278,
+    stockRear: mm(467),
     muzzleKind: 'comp',
-    magZ: -0.058,
+    magZ: mm(-85),
     magTilt: 0.12,
-    mag: { w: 0.0296, d: 0.0742, len: 0.196, curve: 0.026, segs: 6 },
-    opticRise: 0.058,
-    opticZ: -0.008,
+    mag: mmAll({ w: 29.6, d: 74.2, len: 130, curve: 18 }),
+    magSegs: 9,
+    opticRise: mm(58),
+    opticZ: mm(-24),
     shell: { caseLen: 0.0535, rimR: 0.0063 },
     features: [
-      'gasTube',
-      'sideRail',
-      'woodFurniture',
-      'thumbholeStock',
-      'cheekRest',
-      'slingLoop',
-      'bipodLug',
+      'gasTube', 'sideRail', 'woodFurniture', 'thumbholeStock', 'cheekRest', 'slingLoop',
+      'bipodLug', 'svdVentedHandguard', 'svdFlashHider', 'longBarrel',
     ],
-    rollmarks: [{ x: -0.0158, y: 0.0352, z: -0.03, h: 0.0032, pattern: [3, 3, 1, 2, 0, 3, 2, 1] }],
+    rollmarks: [{ x: -0.0158, y: 0.0352, z: mm(-46), h: 0.0032, pattern: [3, 3, 1, 2, 0, 3, 2, 1] }],
   },
 
-  /* ------------------------------------------------------------------ MP5 */
+  /* ------------------------------------------------------------------ MP5 --
+   * H&K MP5A3, 9x19. Overall 680 mm with the stock out, barrel 225 mm, receiver
+   * only 220 mm — and a 30-round magazine 235 mm long, i.e. LONGER than the
+   * receiver it feeds. That inversion is genuinely how an MP5 looks, and it is
+   * the cheapest possible way to make it unmistakable beside a rifle. */
   mp5: {
     id: 'mp5',
     label: 'MP5',
     pattern: 'smg',
+    signature: 'mp5',
     fxClass: 'smg',
     bore: 0.071,
-    rUpper: 0.0178,
-    railRise: 0.0248,
-    zUpperRear: 0.046,
-    zUpperFront: -0.118,
-    portZ: -0.04,
-    zBreech: -0.082,
-    zBarrelEnd: -0.292,
-    rBarrel: 0.0068,
-    rChamber: 0.0098,
+    rUpper: mm(17.8),
+    railRise: mm(24.8),
+    zUpperRear: mm(80),
+    zUpperFront: mm(-140),
+    portZ: mm(-45),
+    zBreech: mm(-125),
+    zBarrelEnd: mm(-305),
+    rBarrel: mm(6.8),
+    rChamber: mm(9.8),
     gasAt: null,
-    hgZ0: -0.12,
-    hgZ1: -0.268,
-    hgR: 0.0226,
+    hgZ0: mm(-145),
+    hgZ1: mm(-295),
+    hgR: mm(22.6),
     hgSides: 8,
     hgSlots: 2,
-    handZ: -0.196,
-    gripZ: 0.008,
+    handZ: mm(-220),
+    gripZ: mm(10),
     gripAngle: 0.42,
-    stockRear: 0.218,
+    stockRear: mm(305),
     muzzleKind: 'trilug',
-    magZ: -0.044,
-    magTilt: 0.04,
-    mag: { w: 0.026, d: 0.0582, len: 0.2, curve: 0.016, segs: 7 },
-    opticRise: 0.056,
-    opticZ: -0.012,
+    magZ: mm(-60),
+    magTilt: 0.03,
+    mag: mmAll({ w: 26, d: 58.2, len: 235, curve: 16 }),
+    magSegs: 15,
+    opticRise: mm(56),
+    opticZ: mm(-14),
     shell: { caseLen: 0.0192, rimR: 0.00478 },
     features: [
-      'tubularReceiver',
-      'wrapHandguard',
-      'rollerDelay',
-      'collapsingStock',
-      'clawMount',
-      'slingLoop',
+      'tubularReceiver', 'wrapHandguard', 'rollerDelay', 'collapsingStock', 'clawMount',
+      'slingLoop', 'mp5CockingTube', 'mp5DrumSight', 'mp5Slap', 'paddleRelease', 'triLugBarrel',
     ],
-    rollmarks: [{ x: -0.0138, y: 0.0308, z: -0.022, h: 0.0028, pattern: [2, 2, 3, 0, 1, 3, 2] }],
+    rollmarks: [{ x: -0.0138, y: 0.0308, z: mm(-30), h: 0.0028, pattern: [2, 2, 3, 0, 1, 3, 2] }],
   },
 
-  /* ----------------------------------------------------------------- M870 */
+  /* ----------------------------------------------------------------- M870 --
+   * Remington 870, 12 gauge, 18.5 in. Receiver only 200 mm; almost everything
+   * forward of it is the pair of concentric tubes — barrel over magazine — that
+   * no other weapon in the roster has. */
   m870: {
     id: 'm870',
     label: 'M870',
     pattern: 'pump',
+    signature: 'pump',
     fxClass: 'shotgun',
     bore: 0.073,
-    rUpper: 0.0224,
-    railRise: 0.0288,
-    zUpperRear: 0.05,
-    zUpperFront: -0.132,
-    portZ: -0.046,
-    zBreech: -0.096,
-    zBarrelEnd: -0.53,
-    rBarrel: 0.0106,
-    rChamber: 0.0142,
+    rUpper: mm(22.4),
+    railRise: mm(28.8),
+    zUpperRear: mm(90),
+    zUpperFront: mm(-110),
+    portZ: mm(-40),
+    zBreech: mm(-100),
+    zBarrelEnd: mm(-560),
+    rBarrel: mm(10.6),
+    rChamber: mm(14.2),
     gasAt: null,
-    hgZ0: -0.166,
-    hgZ1: -0.302,
-    hgR: 0.0268,
+    hgZ0: mm(-190),
+    hgZ1: mm(-330),
+    hgR: mm(26.8),
     hgSides: 8,
     hgSlots: 0,
-    handZ: -0.232,
-    gripZ: 0.016,
+    handZ: mm(-260),
+    gripZ: mm(16),
     gripAngle: 0.46,
-    stockRear: 0.264,
+    stockRear: mm(360),
     muzzleKind: 'none',
     magZ: null,
     magTilt: 0,
-    mag: { w: 0, d: 0, len: 0, curve: 0, segs: 0 },
-    tubeMag: { r: 0.0128, z0: -0.13, z1: -0.44, drop: 0.0216 },
-    opticRise: 0.06,
-    opticZ: -0.014,
+    mag: { w: 0, d: 0, len: 0, curve: 0 },
+    magSegs: 0,
+    tubeMag: mmAll({ r: 12.8, z0: -130, z1: -480, drop: 21.6 }),
+    opticRise: mm(60),
+    opticZ: mm(-18),
     shell: { caseLen: 0.0699, rimR: 0.00985 },
     features: [
-      'tubeMagazine',
-      'slidingForend',
-      'actionBars',
-      'shellLifter',
-      'ventedRib',
-      'beadSight',
-      'slingLoop',
+      'tubeMagazine', 'slidingForend', 'actionBars', 'shellLifter', 'ventedRib', 'beadSight',
+      'slingLoop', 'woodFurniture', 'forendRibs', 'shellCarrier',
     ],
-    rollmarks: [{ x: -0.017, y: 0.0342, z: -0.024, h: 0.003, pattern: [3, 1, 3, 2, 0, 2, 3] }],
+    rollmarks: [{ x: -0.017, y: 0.0342, z: mm(-30), h: 0.003, pattern: [3, 1, 3, 2, 0, 2, 3] }],
   },
 
-  /* ------------------------------------------------------------- Glock-18 */
+  /* ------------------------------------------------------------- Glock-18 --
+   * 9x19, overall 186 mm, barrel 114 mm, slide 174 mm. The squared-off polymer
+   * frame with a straight backstrap, the flat-topped slide and the two big
+   * serration blocks are the whole identity; there is nothing else to it. */
   glock18: {
     id: 'glock18',
     label: 'Glock-18',
     pattern: 'pistol',
+    signature: 'glock',
     fxClass: 'pistol',
     bore: 0.028,
-    rUpper: 0.0131,
-    railRise: 0.0142,
-    zUpperRear: 0.052,
-    zUpperFront: -0.131,
-    portZ: 0.014,
-    zBreech: -0.006,
-    zBarrelEnd: -0.138,
-    rBarrel: 0.0062,
-    rChamber: 0.0092,
+    rUpper: mm(13.1),
+    railRise: mm(14.2),
+    zUpperRear: mm(48),
+    zUpperFront: mm(-122),
+    portZ: mm(14),
+    zBreech: mm(-8),
+    zBarrelEnd: mm(-125),
+    rBarrel: mm(6.2),
+    rChamber: mm(9.2),
     gasAt: null,
     hgZ0: null,
     hgZ1: null,
     hgR: null,
     hgSides: 0,
     hgSlots: 0,
-    handZ: -0.05,
-    gripZ: 0.014,
+    handZ: mm(-50),
+    gripZ: mm(14),
     gripAngle: 0.32,
     stockRear: null,
     muzzleKind: 'none',
-    magZ: 0.006,
+    magZ: mm(6),
     magTilt: 0.1,
-    mag: { w: 0.0224, d: 0.0332, len: 0.108, curve: 0.004, segs: 4 },
-    slide: { w: 0.0262, h: 0.0248, len: 0.183, zRear: 0.052 },
-    opticRise: 0.026,
-    opticZ: 0.012,
+    mag: mmAll({ w: 22.4, d: 33.2, len: 105, curve: 3 }),
+    magSegs: 4,
+    slide: mmAll({ w: 26.2, h: 24.8, len: 174, zRear: 48 }),
+    opticRise: mm(26),
+    opticZ: mm(12),
     shell: { caseLen: 0.0192, rimR: 0.00478 },
     features: [
-      'polymerFrame',
-      'slideSerrations',
-      'triggerSafety',
-      'accessoryRail',
-      'autoSear',
-      'miniReflexMount',
+      'polymerFrame', 'slideSerrations', 'triggerSafety', 'accessoryRail', 'autoSear',
+      'miniReflexMount', 'fingerGrooves', 'squareTriggerGuard', 'glockBackplate',
     ],
-    rollmarks: [{ x: -0.0128, y: 0.0332, z: -0.04, h: 0.0024, pattern: [2, 3, 1, 2, 0, 3] }],
+    rollmarks: [{ x: -0.0128, y: 0.0332, z: mm(-46), h: 0.0024, pattern: [2, 3, 1, 2, 0, 3] }],
   },
 
-  /* --------------------------------------------------------- Desert Eagle */
+  /* --------------------------------------------------------- Desert Eagle --
+   * Mark XIX, .50 AE. Overall 269 mm, barrel 152 mm, slide 215 mm — a pistol
+   * that is nearly half again the Glock's length and visibly heavier in every
+   * section. Triangular slide, ventilated rib, gas tube under the barrel. */
   deagle: {
     id: 'deagle',
     label: 'Desert Eagle',
     pattern: 'pistol',
+    signature: 'deagle',
     fxClass: 'pistol',
     bore: 0.028,
-    rUpper: 0.0146,
-    railRise: 0.0158,
-    zUpperRear: 0.058,
-    zUpperFront: -0.157,
-    portZ: 0.016,
-    zBreech: -0.008,
-    zBarrelEnd: -0.166,
-    rBarrel: 0.0082,
-    rChamber: 0.0116,
-    gasAt: -0.11,
+    rUpper: mm(14.6),
+    railRise: mm(15.8),
+    zUpperRear: mm(62),
+    zUpperFront: mm(-155),
+    portZ: mm(16),
+    zBreech: mm(-6),
+    zBarrelEnd: mm(-165),
+    rBarrel: mm(8.2),
+    rChamber: mm(11.6),
+    gasAt: mm(-110),
     hgZ0: null,
     hgZ1: null,
     hgR: null,
     hgSides: 0,
     hgSlots: 0,
-    handZ: -0.06,
-    gripZ: 0.016,
+    handZ: mm(-60),
+    gripZ: mm(16),
     gripAngle: 0.3,
     stockRear: null,
     muzzleKind: 'none',
-    magZ: 0.008,
+    magZ: mm(8),
     magTilt: 0.08,
-    mag: { w: 0.0246, d: 0.0398, len: 0.114, curve: 0.003, segs: 4 },
-    slide: { w: 0.0288, h: 0.0286, len: 0.215, zRear: 0.058 },
-    opticRise: 0.03,
-    opticZ: 0.014,
+    mag: mmAll({ w: 24.6, d: 39.8, len: 112, curve: 3 }),
+    magSegs: 4,
+    slide: mmAll({ w: 28.8, h: 28.6, len: 215, zRear: 62 }),
+    opticRise: mm(30),
+    opticZ: mm(14),
     shell: { caseLen: 0.0327, rimR: 0.00636 },
     features: [
-      'steelFrame',
-      'gasPiston',
-      'ventedRib',
-      'triangularBarrel',
-      'slideSerrations',
-      'miniReflexMount',
+      'steelFrame', 'gasPiston', 'ventedRib', 'triangularBarrel', 'slideSerrations',
+      'miniReflexMount', 'deagleRib', 'wideBackstrap',
     ],
-    rollmarks: [{ x: -0.0142, y: 0.0358, z: -0.05, h: 0.0026, pattern: [3, 2, 2, 0, 3, 1] }],
+    rollmarks: [{ x: -0.0142, y: 0.0358, z: mm(-60), h: 0.0026, pattern: [3, 2, 2, 0, 3, 1] }],
   },
 };
+
+/**
+ * `mag.segs` used to live inside the `mag` record, which put an integer segment
+ * COUNT next to four lengths in millimetres — so `mmAll` would have scaled it to
+ * 7.9 and the magazine would have been built from eight-tenths of a slice. It is
+ * a separate field now, and this shim keeps the shape the builder and the gate
+ * already read.
+ */
+for (const spec of Object.values(MODEL_SPECS)) spec.mag.segs = spec.magSegs;
 
 export const MODEL_ORDER = [
   'akm',

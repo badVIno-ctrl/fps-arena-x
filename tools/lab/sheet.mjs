@@ -36,13 +36,9 @@ export default async function sheet(page, api) {
     pv.yaw = pv.targetYaw = y;
     pv.pitch = pv.targetPitch = 0;
     pv.dragging = true; // stops the idle spin in update()
-    pv.key.intensity = 4.6;
-    pv.fill.intensity = 2.0;
-    pv.rim.intensity = 2.4;
-    const front = new pv.key.constructor(0xffffff, 1.4);
-    front.position.set(0, 0.1, 1);
-    front.castShadow = false;
-    pv.scene.add(front);
+    // The board's own studio is what ships; the sheet only removes the spin so
+    // two runs are comparable. Do NOT relight here — a critic that judges a
+    // different light rig from the one the player sees is judging nothing.
   }, yaw);
 
   const rows = [];

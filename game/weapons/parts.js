@@ -647,8 +647,20 @@ export function addUpperReceiver(asm, mat, matSteel, matCavity, o) {
   asm.add(cover, mat, { x: hingeX, y: hingeY, z: o.portZ });
   cover.dispose();
 
-  // Rail on the crest.
-  addRail(asm, mat, zFront + 0.002, zRear - 0.002, o.railTop);
+  /**
+   * Rail on the crest — OPTIONAL, and it has to be.
+   *
+   * This is the shared upper-receiver builder for the whole roster, and it used
+   * to machine a Picatinny deck unconditionally. That put a nine-slot rail along
+   * the top of an AKM, which is architecturally wrong twice over: a stamped AK
+   * receiver has a hinged DUST COVER on the crest (you cannot mount to it, which
+   * is the entire reason AK optics hang off a side rail) and the arsenal builder
+   * then drew that dust cover on top of the rail. Two mutually exclusive
+   * receiver tops occupying the same 20 mm, and the brighter one won.
+   *
+   * `o.rail !== false` keeps every existing caller unchanged.
+   */
+  if (o.rail !== false) addRail(asm, mat, zFront + 0.002, zRear - 0.002, o.railTop);
 
   // Receiver pins.
   addPin(asm, matSteel, 0, bore - r + 0.004, zFront + 0.014, 0.0024, r * 2 - 0.004);

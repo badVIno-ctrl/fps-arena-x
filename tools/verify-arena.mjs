@@ -705,15 +705,40 @@ async function models() {
     for (const fn of [
       'addUpperReceiver', 'addLowerReceiver', 'addBarrel', 'addMuzzleDevice', 'addHandguard',
       'addRail', 'addPistolGrip', 'addCarbineStock', 'addFrontSight', 'addRearSight',
-      'addRollmark', 'buildMagazine', 'buildOptic', 'buildSlide', 'buildMiniReflex',
+      'addRollmark', 'buildMagazine', 'buildSlide',
       'triggerPart', 'selectorPart', 'chargingHandlePart', 'cartridge',
     ]) {
       assert(code.includes(`${fn}(`), `builder never calls ${fn}`);
     }
   });
+  /**
+   * OPTICS BELONG TO THE HARDWARE RIG, NOT TO THE RECEIVER.
+   *
+   * This check used to demand `buildOptic(` and `buildMiniReflex(` inside the
+   * weapon-body builder, and that demand was itself the bug: it pinned a 52 mm
+   * scope tube into every long gun's BODY, so a rifle wore a floating can with
+   * `optic: 'iron'` selected and mounting a real sight produced two sights
+   * stacked on one rail. A sight you cannot take off is not an attachment.
+   *
+   * The functions still have to be called by SOMETHING — a gate that just
+   * deleted the requirement would let the optics quietly stop being built — so
+   * the requirement moved to the file that owns mountable hardware.
+   */
+  const hwPath = join(SRC, 'arsenal/hardware/build.js');
+  const hwCode = existsSync(hwPath) ? readFileSync(hwPath, 'utf8') : '';
+  check('optics are built by the attachment rig, not welded to the receiver', () => {
+    assert(hwCode.length > 0, 'hardware/build.js is missing');
+    for (const fn of ['buildOptic', 'buildMiniReflex']) {
+      assert(hwCode.includes(`${fn}(`), `the attachment builder never calls ${fn}`);
+    }
+    assert(
+      !/\bbuildOptic\(/.test(code),
+      'the weapon body still builds a permanent optic: it would stack with the mounted one',
+    );
+  });
   check('builder publishes the full node set and the moving parts', () => {
     assert(code.includes('nodesOf(spec)'), 'builder should take its nodes from the tested specs');
-    assert(code.includes('nodes.opticGlass'), 'the optic node has to come from the built glass');
+    assert(code.includes('nodes.opticGlass'), 'the optic node still has to be published');
     for (const part of ['magazine', 'charging', 'bolt', 'trigger', 'selector']) {
       assert(code.includes(part), `no moving part named ${part}`);
     }

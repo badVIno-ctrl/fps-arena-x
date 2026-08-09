@@ -112,6 +112,13 @@ export class ArsenalSystem {
     // iron height instead of through its own glass. Null means no optic, and the
     // viewmodel falls back to the irons.
     wp.sightPoint = () => this.activeRig()?.sightAxis() ?? null;
+    /**
+     * And the same for the reticle. The viewmodel's collimated dot used to be
+     * driven by a scope welded into the weapon body, so it drew the same dot at
+     * the same aperture whatever was on the rail — including when the rail was
+     * empty. Now it asks the mounted unit.
+     */
+    wp.viewmodel.opticProvider = () => this.activeRig()?.opticGlass() ?? null;
 
     this._off.push(
       ctx.events.on('shell:loadout', (e) => this.applyLoadout(e?.weaponId, e?.loadout))
@@ -185,6 +192,7 @@ export class ArsenalSystem {
       delete this.weapons.slotIds;
       delete this.weapons.resolvedStats;
       delete this.weapons.sightPoint;
+      if (this.weapons.viewmodel) this.weapons.viewmodel.opticProvider = null;
     }
   }
 }

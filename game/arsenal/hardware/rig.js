@@ -289,6 +289,26 @@ export class HardwareRig {
     return this._stats;
   }
 
+  /**
+   * The mounted optic's GLASS, for the collimated reticle.
+   *
+   * The viewmodel draws a red dot by projecting the tube axis from the eye and
+   * vignetting it against the lens aperture (weapons/viewmodel.js
+   * `_updateReticle`), and it used to read that description off a scope welded
+   * into the weapon body. So the reticle was always the welded scope's, whatever
+   * was actually bolted to the rail — a 4x PSO and a 1x red dot drew the same
+   * dot at the same aperture, and with `optic: 'iron'` a dot appeared with no
+   * sight in front of it at all.
+   *
+   * Returning the live unit's own glass makes the reticle a property of the sight
+   * the player mounted, which is the entire point of a mountable sight. `null`
+   * means irons: no reticle, and the viewmodel hides it.
+   */
+  opticGlass() {
+    const optic = this.mounted.optic;
+    return optic?.glass ?? null;
+  }
+
   /** The sight line the camera should use: the mounted optic, or the irons. */
   sightAxis() {
     const optic = this.mounted.optic;
