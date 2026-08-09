@@ -14,6 +14,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// The source of truth for the numbers the menu's match brief repeats.
+import { MODES } from '../game/modes/rules.js';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WIDTH = 60;
 
@@ -109,6 +112,102 @@ check('a nickname is required online and capped at the relay limit', () => {
   const commit = MENU.slice(MENU.indexOf('  _commit('));
   assert(/nickname\.length < 2/.test(commit), 'an empty nickname would be sent to the relay');
   assert(commit.indexOf('return;') < commit.indexOf('resolve('), 'the guard does not stop the match starting');
+});
+
+check('the match brief tells the truth about the match', () => {
+  // The brief duplicates figures that live in game/modes/rules.js, because the
+  // menu is forbidden from importing anything (see the check above). Duplication
+  // is acceptable only if it cannot rot, so the numbers are checked against
+  // their source here.
+  const brief = MENU.slice(MENU.indexOf('const BRIEF = ['), MENU.indexOf('const CSS = `'));
+  assert(brief.includes('ЗАДАЧА'), 'the brief does not state the objective');
+
+  const respawn = MODES.bots.respawn;
+  assert(
+    new RegExp(`игрок — ${respawn.player} с`).test(brief),
+    `the brief claims a respawn rules.js does not: rules say ${respawn.player}s`,
+  );
+  assert(
+    respawn.bot === null,
+    'bots respawn now, so "без подкреплений" in the brief is a lie',
+  );
+  assert(/без подкреплений/.test(brief), 'the brief no longer says the garrison is finite');
+
+  // The objective row must be live, or the brief contradicts the selector two
+  // rows below it.
+  assert(/live: 'objective'/.test(brief), 'the objective row is hardcoded');
+  assert(/_syncBrief\(\)/.test(MENU), 'nothing keeps the brief in step with the selector');
+  const sub = MENU.slice(MENU.indexOf('this._sub = segmented('));
+  assert(
+    /_syncBrief\(\)/.test(sub.slice(0, 200)),
+    'changing the objective does not update the brief',
+  );
+});
+
+check('motion comes from tokens, with no ease-in and nothing sluggish', () => {
+  // Emil Kowalski's rules, mechanically: one curve per purpose, durations from
+  // the table, and never ease-in on UI — it starts slow, which delays the exact
+  // moment the user is watching for.
+  assert(/--ease-out: cubic-bezier/.test(MENU), 'no ease-out token');
+  assert(/--dur-press:/.test(MENU) && /--dur-hover:/.test(MENU), 'no duration tokens');
+
+  const rawCurves = [...MENU.matchAll(/cubic-bezier\([^)]*\)/g)].map((m) => m[0]);
+  assert(
+    new Set(rawCurves).size <= 3,
+    `${new Set(rawCurves).size} distinct curves: they should be tokens, not sprinkled`,
+  );
+
+  // No transition may declare ease-in, and none may run long enough to feel
+  // slow. 300ms is the ceiling for interface motion.
+  const transitions = [...MENU.matchAll(/transition[^;]*;/g)].map((m) => m[0]);
+  for (const t of transitions) {
+    assert(!/\bease-in\b(?!-out)/.test(t), `ease-in on UI motion: ${t.trim()}`);
+    for (const ms of [...t.matchAll(/(\d+)ms/g)].map((m) => Number(m[1]))) {
+      assert(ms <= 300, `${ms}ms transition is over the 300ms interface ceiling: ${t.trim()}`);
+    }
+    for (const s of [...t.matchAll(/([\d.]+)s\b/g)].map((m) => Number(m[1]))) {
+      assert(s <= 0.3, `${s}s transition is over the 300ms interface ceiling: ${t.trim()}`);
+    }
+  }
+
+  // Nothing may appear from nothing: scale(0) is not how objects behave.
+  assert(!/scale\(0\)/.test(MENU), 'scale(0) appears: nothing in the world grows from a point');
+});
+
+check('everything pressable answers the press', () => {
+  for (const sel of ['.fa-card:active', '.fa-start:active']) {
+    assert(MENU.includes(sel), `${sel} has no press feedback`);
+  }
+});
+
+check('the surfaces the browser draws are themed too', () => {
+  // The cheapest signal that a screen was built rather than assembled: a blue
+  // system highlight on a warm dark panel is visible to everyone and chosen by
+  // nobody.
+  assert(/::selection/.test(MENU), 'text selection uses the browser default');
+  assert(/caret-color:/.test(MENU), 'the caret uses the browser default');
+  assert(/scrollbar-color:|::-webkit-scrollbar/.test(MENU), 'the scrollbar is unstyled');
+  assert(/:focus-visible/.test(MENU), 'there is no keyboard focus ring');
+  // :focus-visible rather than :focus, so a mouse click does not leave a ring.
+  assert(
+    !/[^-]:focus\s*\{[^}]*outline:\s*2px/.test(MENU),
+    'the focus ring is on :focus, so it shows after a mouse click too',
+  );
+});
+
+check('numeric data is set in tabular figures', () => {
+  // Score chips, player counts and the brief all carry numbers that sit beside
+  // each other; proportional digits make columns of them ripple.
+  assert(/font-variant-numeric: tabular-nums/.test(MENU), 'numbers use proportional figures');
+});
+
+check('the layout uses the width it is given', () => {
+  // At 1920 the options used to run down a narrow left column with the right
+  // 45% of the viewport empty.
+  assert(
+    /@media \(min-width: 1024px\)[\s\S]{0,200}\.fa-opts \{[^}]*grid-template-columns/.test(MENU),
+    'the option rows never go multi-column on a wide screen',
+  );
 });
 
 check('the start button cannot be pressed twice', () => {

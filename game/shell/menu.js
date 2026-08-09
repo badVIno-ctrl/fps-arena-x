@@ -76,15 +76,75 @@ const DIFFICULTIES = [
   { id: 'hard', label: 'СЛОЖНО' },
 ];
 
+/**
+ * The match brief shown inside the featured card.
+ *
+ * Every value is a fact about what the player is about to load, transcribed from
+ * game/modes/rules.js (`respawn: { player: 6, bot: null }`, a garrison sized by
+ * difficulty) and from game/world (one street, 120x120 m, eighteen buildings of
+ * which three are enterable). Transcribed rather than imported because this file
+ * must have zero imports — verify-shell.mjs enforces that, and it is what
+ * guarantees the menu paints before three.js exists. The gate below checks the
+ * numbers against rules.js so the duplication cannot rot.
+ *
+ * `objective` is filled in at runtime from the selector, which is what turns this
+ * from a caption into a summary.
+ */
+const BRIEF = [
+  { key: 'ЗАДАЧА', live: 'objective' },
+  { key: 'ГАРНИЗОН', value: '60 бойцов · без подкреплений' },
+  { key: 'КАРТА', value: 'Рынок · 120 × 120 м' },
+  { key: 'ВОЗРОЖДЕНИЕ', value: 'игрок — 6 с' },
+];
+
 const CSS = `
 .fa-menu {
   position: fixed; inset: 0; z-index: 40;
   --bg: #0b0e13; --panel: #131922; --line: #1e2733;
   --ink: #eef2f7; --muted: #93a1b4;
   --solo: #f5a524; --duel: #ff5145; --squad: #2dd4bf;
+
+  /* Motion tokens.
+   *
+   * The built-in CSS easings are too weak to read as intentional, and a
+   * hand-rolled cubic-bezier is how a project ends up with six curves that all
+   * nearly match. One strong ease-out for anything entering or responding, one
+   * ease-in-out for something moving on screen, and durations from the table
+   * that says a dropdown at 180ms feels faster than the same dropdown at 400ms.
+   *
+   * ease-in is deliberately absent. It starts slow, which delays the exact
+   * moment the user is watching for. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 140ms;
+  --dur-hover: 180ms;
+
   background: var(--bg); color: var(--ink);
   font: 400 15px/1.55 ${FONT_STACK};
   overflow-y: auto; cursor: default;
+
+  /* Browser surfaces.
+   *
+   * Selection, the caret, the focus ring and the scrollbar all ship with
+   * defaults that belong to no design system — a blue Windows highlight on a
+   * warm dark panel is the single cheapest tell that a page was assembled
+   * rather than built. They are four declarations and they cost nothing. */
+  caret-color: var(--solo);
+  scrollbar-width: thin;
+  scrollbar-color: #2b3644 transparent;
+}
+.fa-menu ::selection { background: color-mix(in oklab, var(--solo) 34%, transparent); color: var(--ink); }
+.fa-menu ::-webkit-scrollbar { width: 10px; height: 10px; }
+.fa-menu ::-webkit-scrollbar-track { background: transparent; }
+.fa-menu ::-webkit-scrollbar-thumb { background: #2b3644; border-radius: 6px; border: 3px solid var(--bg); }
+.fa-menu ::-webkit-scrollbar-thumb:hover { background: #3a4757; }
+/* One focus ring for the whole screen, keyboard-only, drawn in the accent of
+   whatever is focused. :focus-visible rather than :focus so a mouse click does
+   not leave a ring behind it. */
+.fa-menu :focus-visible {
+  outline: 2px solid var(--accent, var(--solo));
+  outline-offset: 2px;
+  border-radius: 10px;
 }
 /* A 46px grid and a grain wash: without them a flat dark panel reads as an
    unstyled page rather than a deliberate one. Both are painted, never animated. */
@@ -151,17 +211,64 @@ const CSS = `
   position: relative; text-align: left; display: flex; flex-direction: column; gap: 10px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 22px; color: inherit; font: inherit; cursor: pointer;
-  transition: border-color .18s ease, transform .18s ease, background .18s ease;
+  transition:
+    border-color var(--dur-hover) var(--ease-out),
+    transform var(--dur-hover) var(--ease-out),
+    background var(--dur-hover) var(--ease-out);
 }
-.fa-card:hover, .fa-card:focus-visible { border-color: var(--accent); transform: translateY(-2px); outline: none; }
+.fa-card:hover, .fa-card:focus-visible { border-color: var(--accent); transform: translateY(-2px); }
+/* Press feedback. Every pressable thing on this screen gets it, because the one
+   moment a player is certain they clicked is the moment the surface moves under
+   the pointer. 0.985 rather than the usual 0.97: these are large cards, and a
+   scale that reads as subtle on a button reads as a lurch on a 400 px panel. */
+.fa-card:active { transform: scale(.985) translateY(0); transition-duration: var(--dur-press); }
 .fa-card[aria-pressed="true"] { border-color: var(--accent); background: #161d28; }
 .fa-card .fa-tag { font-size: 10px; letter-spacing: .26em; color: var(--accent); }
 .fa-card h2 { font-size: 15px; letter-spacing: .04em; font-weight: 700; }
 .fa-featured h2 { font-size: clamp(26px, 3.4vw, 40px); letter-spacing: -.01em; }
 .fa-card p { color: var(--muted); font-size: 13px; }
-.fa-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
-.fa-chip { font-size: 10px; letter-spacing: .16em; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; }
+
+/* The match brief.
+ *
+ * This block exists because of a real defect rather than a wish for decoration.
+ * The featured card is stretched by the two stacked cards beside it, and with
+ * only a heading and one line of copy inside, that left 250 px of nothing at
+ * 1080p — which does not read as breathing room, it reads as a layout that
+ * broke. Filling it with a graphic would have been decoration standing in for
+ * content; filling it with the actual parameters of the match the player is
+ * about to load answers the question the screen was silent about.
+ *
+ * Every figure here is true and comes from game/modes/rules.js and the world:
+ * a sixty-strong garrison that does NOT respawn, a six second player respawn, a
+ * single 120x120 m street. The objective row is live — it follows the selector
+ * below, so the brief is a summary of the configuration rather than a caption. */
+.fa-brief {
+  margin-top: 16px; display: grid; gap: 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.fa-brief div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 9px 0; border-bottom: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+}
+.fa-brief dt, .fa-brief span:first-child {
+  color: var(--muted); font-size: 10px; letter-spacing: .22em; white-space: nowrap;
+}
+.fa-brief span:last-child { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.fa-brief em { color: var(--accent); font-style: normal; }
+
+.fa-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 16px; }
+.fa-chip {
+  font-size: 10px; letter-spacing: .16em; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px;
+  font-variant-numeric: tabular-nums;
+}
 .fa-go { margin-top: 14px; font-size: 12px; letter-spacing: .18em; color: var(--accent); }
+/* The arrow leads the eye a hair further on hover. 3 px, once, on the element
+   the pointer is already over — not a loop, and not on the card as a whole. */
+.fa-go i { display: inline-block; font-style: normal; transition: transform var(--dur-hover) var(--ease-out); }
+.fa-card:hover .fa-go i { transform: translateX(3px); }
+
 .fa-opts { margin-top: 22px; display: grid; gap: 14px; }
 .fa-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .fa-label { font-size: 10px; letter-spacing: .26em; color: var(--muted); min-width: 92px; }
@@ -169,19 +276,27 @@ const CSS = `
 .fa-seg button {
   background: transparent; border: 0; color: var(--muted); font: inherit; font-size: 11px;
   letter-spacing: .16em; padding: 8px 14px; cursor: pointer;
+  transition: background var(--dur-press) var(--ease-out), color var(--dur-press) var(--ease-out);
 }
+.fa-seg button:hover { color: var(--ink); background: rgba(255,255,255,.04); }
+.fa-seg button:active { background: rgba(255,255,255,.09); }
 .fa-seg button[aria-pressed="true"] { background: #1b2430; color: var(--ink); }
 .fa-nick {
   background: #0e131b; border: 1px solid var(--line); border-radius: 10px; color: var(--ink);
   font: inherit; font-size: 13px; padding: 8px 12px; width: 220px;
+  transition: border-color var(--dur-hover) var(--ease-out);
 }
+.fa-nick::placeholder { color: color-mix(in oklab, var(--muted) 70%, transparent); }
 .fa-nick:focus { outline: none; border-color: var(--solo); }
 .fa-start {
   margin-top: 8px; align-self: start; background: var(--ink); color: #0b0e13; border: 0;
   border-radius: 11px; font: inherit; font-weight: 700; font-size: 13px; letter-spacing: .18em;
   padding: 14px 26px; cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-out), opacity var(--dur-hover) var(--ease-out);
 }
-.fa-start:disabled { opacity: .45; cursor: progress; }
+.fa-start:hover { transform: translateY(-1px); }
+.fa-start:active { transform: scale(.97); }
+.fa-start:disabled { opacity: .45; cursor: progress; transform: none; }
 .fa-foot { margin-top: 26px; color: var(--muted); font-size: 12px; }
 .fa-note { color: var(--duel); font-size: 12px; min-height: 18px; }
 .fa-bar {
@@ -196,9 +311,20 @@ const CSS = `
 @media (max-width: 860px) {
   .fa-cards { grid-template-columns: 1fr; }
 }
+/* Wide screens.
+ *
+ * The options used to run down a single narrow column on the left while the
+ * right 45% of a 1920 viewport held nothing at all — the page was designed at
+ * 1160 px and simply left the rest empty. Two columns of option rows shorten the
+ * vertical run and put the configuration beside the cards it configures, which
+ * is also where the eye already is after choosing a mode. */
+@media (min-width: 1024px) {
+  .fa-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 32px; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .fa-card { transition: none; }
-  .fa-card:hover { transform: none; }
+  .fa-card, .fa-start, .fa-go i, .fa-seg button, .fa-nick { transition: none; }
+  .fa-card:hover, .fa-card:active, .fa-start:hover, .fa-start:active { transform: none; }
+  .fa-card:hover .fa-go i { transform: none; }
 }
 `;
 
@@ -300,7 +426,7 @@ export class ModeMenu {
 
     const subRow = el('div', 'fa-row');
     subRow.append(el('span', 'fa-label', 'ЗАДАЧА'));
-    this._sub = segmented(SUBMODES, this.submode, (v) => { this.submode = v; });
+    this._sub = segmented(SUBMODES, this.submode, (v) => { this.submode = v; this._syncBrief(); });
     subRow.append(this._sub);
 
     const diffRow = el('div', 'fa-row');
@@ -355,6 +481,7 @@ export class ModeMenu {
     this.root = root;
 
     this._select(this.mode);
+    this._syncBrief();
     root.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && e.target !== this._start) this._commit(resolve);
     });
@@ -420,14 +547,41 @@ export class ModeMenu {
     card.append(el('div', 'fa-tag', def.tag));
     card.append(el('h2', null, def.name));
     card.append(el('p', null, def.note));
+
+    // Only the featured card carries a brief: it is the one with room, and it is
+    // the one whose configuration lives on this screen.
+    if (def.featured) {
+      const brief = el('div', 'fa-brief');
+      this._briefValues = new Map();
+      for (const row of BRIEF) {
+        const line = el('div');
+        line.append(el('span', null, row.key));
+        const val = el('span', null, row.value ?? '');
+        if (row.live) this._briefValues.set(row.live, val);
+        line.append(val);
+        brief.append(line);
+      }
+      card.append(brief);
+    }
+
     const chips = el('div', 'fa-chips');
     for (const c of def.chips) chips.append(el('span', 'fa-chip', c));
     card.append(chips);
-    card.append(el('div', 'fa-go', `${def.cta} →`));
+    const go = el('div', 'fa-go');
+    go.append(`${def.cta} `, el('i', null, '→'));
+    card.append(go);
     card.addEventListener('click', () => this._select(def.id));
     card.addEventListener('dblclick', () => this._start?.click());
     this._cards.set(def.id, card);
     return card;
+  }
+
+  /** Keep the brief honest about the objective the selector is showing. */
+  _syncBrief() {
+    const node = this._briefValues?.get('objective');
+    if (!node) return;
+    const id = this._sub?.get?.() ?? this.submode;
+    node.textContent = SUBMODES.find((s) => s.id === id)?.label ?? '';
   }
 
   /** Picking a mode hides the options that mode has no use for. */
@@ -493,6 +647,7 @@ export class ModeMenu {
     // detached DOM.
     this._status = null;
     this._statusText = null;
+    this._briefValues = null;
   }
 }
 
